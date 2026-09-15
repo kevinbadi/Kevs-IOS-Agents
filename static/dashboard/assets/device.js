@@ -1581,7 +1581,10 @@ if (loadedSummary)
     useDeviceSummary(loadedSummary);
 // --- Workflow train / following doomscroll ---------------------------------
 elements.trainToggle.addEventListener('click', () => {
-    setTrainRecording(!trainRecording);
+    const starting = !trainRecording;
+    setTrainRecording(starting);
+    if (starting)
+        setAutomationPlatform('tiktok');
 });
 elements.trainClear.addEventListener('click', () => {
     trainEvents = [];
@@ -1627,37 +1630,56 @@ async function swapDeviceActivity(response) {
     if (activity)
         activity.outerHTML = html;
 }
-function appendBuiltinWorkflowRow(options) {
-    const row = document.createElement('div');
-    row.className = 'task-row';
-    row.innerHTML = `<div><strong>${options.title}</strong><div class="run-meta">${options.meta}</div></div>`;
-    const actions = document.createElement('div');
-    actions.className = 'inline-actions';
-    const configure = document.createElement('button');
-    configure.type = 'button';
-    configure.className = 'button secondary';
-    configure.textContent = 'Configure';
-    configure.addEventListener('click', () => options.onConfigure());
-    const run = document.createElement('button');
-    run.type = 'button';
-    run.className = 'button secondary';
-    run.textContent = 'Run 5m';
-    run.addEventListener('click', async () => {
-        run.disabled = true;
-        try {
-            await options.onRun5m();
-        }
-        catch (error) {
-            setStatus(errorMessage(error), 'error');
-        }
-        finally {
-            run.disabled = false;
-        }
-    });
-    actions.append(configure, run);
-    row.append(actions);
-    elements.workflowList.append(row);
+const PLATFORM_LEAD = {
+    tiktok: 'TikTok jobs — configure opens in a dialog. Live screen stays on the left.',
+    instagram: 'Instagram jobs — Reels warmup, following engage, and cold DMs.',
+    linkedin: 'LinkedIn jobs — search a lead, open the profile, then connect.',
+};
+function isAutomationPlatform(value) {
+    return value === 'tiktok' || value === 'instagram' || value === 'linkedin';
 }
+const platformButtons = Array.from(document.querySelectorAll('.platform-switch-btn[data-platform]'));
+const workflowGroups = Array.from(document.querySelectorAll('.workflow-group[data-platform]'));
+const workflowsLead = element('#workflows-lead');
+const platformStorageKey = `farm.automationPlatform.${udid}`;
+function readAutomationPlatform() {
+    const fromUrl = new URLSearchParams(location.search).get('platform');
+    if (isAutomationPlatform(fromUrl))
+        return fromUrl;
+    try {
+        const stored = localStorage.getItem(platformStorageKey);
+        if (isAutomationPlatform(stored))
+            return stored;
+    }
+    catch { /* ignore quota / private mode */ }
+    return 'tiktok';
+}
+function setAutomationPlatform(platform, persist = true) {
+    for (const button of platformButtons) {
+        button.setAttribute('aria-selected', button.dataset.platform === platform ? 'true' : 'false');
+    }
+    for (const group of workflowGroups) {
+        group.hidden = group.dataset.platform !== platform;
+    }
+    workflowsLead.textContent = PLATFORM_LEAD[platform];
+    if (!persist)
+        return;
+    try {
+        localStorage.setItem(platformStorageKey, platform);
+    }
+    catch { /* ignore */ }
+    const url = new URL(location.href);
+    url.searchParams.set('platform', platform);
+    history.replaceState(null, '', url);
+}
+for (const button of platformButtons) {
+    button.addEventListener('click', () => {
+        const platform = button.dataset.platform ?? '';
+        if (isAutomationPlatform(platform))
+            setAutomationPlatform(platform);
+    });
+}
+setAutomationPlatform(readAutomationPlatform(), true);
 async function loadWorkflows() {
     elements.workflowList.classList.add('loading-card');
     elements.workflowList.innerHTML = '<span class="spinner" aria-hidden="true"></span>Loading workflows…';
@@ -1666,41 +1688,6 @@ async function loadWorkflows() {
         const workflows = data.workflows ?? [];
         elements.workflowList.classList.remove('loading-card');
         elements.workflowList.innerHTML = '';
-        appendBuiltinWorkflowRow({
-            title: 'Instagram · Engage following',
-            meta: 'Built-in · Reels → Friends · like/comment',
-            onConfigure: () => elements.instagramFollowingDoomscrollDialog.showModal(),
-            onRun5m: async () => {
-                const form = new FormData();
-                form.set('durationMinutes', '5');
-                form.set('personality', 'dialed');
-                form.set('likeEnabled', 'on');
-                form.set('commentEnabled', 'on');
-                form.set('commentText', '🔥');
-                form.set('scheduleKind', 'now');
-                form.set('timezone', Intl.DateTimeFormat().resolvedOptions().timeZone);
-                const response = await fetch(`/api/devices/${encodeURIComponent(udid)}/instagram/fragments/following-scroll-run`, { method: 'POST', body: form });
-                await swapDeviceActivity(response);
-            },
-        });
-        appendBuiltinWorkflowRow({
-            title: 'TikTok · Engagement',
-            meta: 'Built-in · Following feed · like/comment/save',
-            onConfigure: () => elements.followingDoomscrollDialog.showModal(),
-            onRun5m: async () => {
-                const form = new FormData();
-                form.set('durationMinutes', '5');
-                form.set('personality', 'dialed');
-                form.set('likeEnabled', 'on');
-                form.set('commentEnabled', 'on');
-                form.set('saveEnabled', 'on');
-                form.set('commentText', '🔥');
-                form.set('scheduleKind', 'now');
-                form.set('timezone', Intl.DateTimeFormat().resolvedOptions().timeZone);
-                const response = await fetch(`/api/devices/${encodeURIComponent(udid)}/fragments/following-scroll-run`, { method: 'POST', body: form });
-                await swapDeviceActivity(response);
-            },
-        });
         if (workflows.length === 0) {
             const empty = document.createElement('p');
             empty.className = 'hint';

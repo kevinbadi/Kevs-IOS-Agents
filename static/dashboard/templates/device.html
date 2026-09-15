@@ -85,10 +85,14 @@
                     <div class="section-heading">
                         <div><span class="eyebrow">Automations</span><h2>Workflows</h2></div>
                     </div>
-                    <p class="workflows-lead">Pick a job — configure opens in a dialog. Live screen stays on the left.</p>
+                    <div class="platform-switch" role="tablist" aria-label="Automation platform">
+                        <button type="button" class="platform-switch-btn" role="tab" id="platform-tiktok" data-platform="tiktok" aria-selected="true">TikTok</button>
+                        <button type="button" class="platform-switch-btn" role="tab" id="platform-instagram" data-platform="instagram" aria-selected="false">Instagram</button>
+                        <button type="button" class="platform-switch-btn" role="tab" id="platform-linkedin" data-platform="linkedin" aria-selected="false">LinkedIn</button>
+                    </div>
+                    <p class="workflows-lead" id="workflows-lead">TikTok jobs — configure opens in a dialog. Live screen stays on the left.</p>
 
-                    <div class="workflow-group">
-                        <h3 class="workflow-group-label">TikTok</h3>
+                    <div class="workflow-group" data-platform="tiktok">
                         <div class="workflow-rows">
                             <article class="workflow-row">
                                 <button id="open-doomscroll" class="workflow-tile" type="button">
@@ -151,28 +155,66 @@
                                 </div>
                             </article>
                         </div>
-                    </div>
-
-                    <div class="workflow-group">
-                        <h3 class="workflow-group-label">Instagram</h3>
-                        <div class="workflow-grid">
-                            <button id="open-instagram-doomscroll" class="workflow-tile" type="button">
-                                <span class="workflow-tile-title">Warmup</span>
-                                <span class="workflow-tile-desc">Reels · age the account</span>
-                            </button>
-                            <button id="open-instagram-following-doomscroll" class="workflow-tile" type="button">
-                                <span class="workflow-tile-title">Engage following</span>
-                                <span class="workflow-tile-desc">Reels Friends · soft recovery</span>
-                            </button>
-                            <button id="open-instagram-cold-dms" class="workflow-tile" type="button">
-                                <span class="workflow-tile-title">Cold DMs</span>
-                                <span class="workflow-tile-desc">Lead list or handles · compose &amp; send</span>
-                            </button>
+                        <div class="trained-workflows">
+                            <div class="section-heading">
+                                <div><span class="eyebrow">Trained</span><h3 class="workflow-group-heading">Custom patterns</h3></div>
+                                <button id="refresh-workflows" class="icon-button" type="button">Refresh</button>
+                            </div>
+                            <div id="workflow-list" class="task-list workflow-list-compact loading-card"><span class="spinner" aria-hidden="true"></span>Loading…</div>
                         </div>
                     </div>
 
-                    <div class="workflow-group">
-                        <h3 class="workflow-group-label">LinkedIn</h3>
+                    <div class="workflow-group" data-platform="instagram" hidden>
+                        <div class="workflow-rows">
+                            <article class="workflow-row">
+                                <button id="open-instagram-doomscroll" class="workflow-tile" type="button">
+                                    <span class="workflow-tile-title">Warmup</span>
+                                    <span class="workflow-tile-desc">Reels · age the account</span>
+                                </button>
+                                <div class="workflow-how" aria-label="How Instagram warmup works">
+                                    <p class="workflow-how-label">How it works</p>
+                                    <ol class="workflow-steps">
+                                        <li><span class="workflow-step-n">1</span><span class="workflow-step-t">Open Instagram</span></li>
+                                        <li><span class="workflow-step-n">2</span><span class="workflow-step-t">Land on Reels</span></li>
+                                        <li><span class="workflow-step-n">3</span><span class="workflow-step-t">Watch &amp; swipe</span></li>
+                                        <li><span class="workflow-step-n">4</span><span class="workflow-step-t">Like · comment</span></li>
+                                    </ol>
+                                </div>
+                            </article>
+                            <article class="workflow-row">
+                                <button id="open-instagram-following-doomscroll" class="workflow-tile" type="button">
+                                    <span class="workflow-tile-title">Engage following</span>
+                                    <span class="workflow-tile-desc">Reels Friends · soft recovery</span>
+                                </button>
+                                <div class="workflow-how" aria-label="How Engage following works">
+                                    <p class="workflow-how-label">How it works</p>
+                                    <ol class="workflow-steps">
+                                        <li><span class="workflow-step-n">1</span><span class="workflow-step-t">Open Instagram</span></li>
+                                        <li><span class="workflow-step-n">2</span><span class="workflow-step-t">Switch to Friends</span></li>
+                                        <li><span class="workflow-step-n">3</span><span class="workflow-step-t">Watch followed creators</span></li>
+                                        <li><span class="workflow-step-n">4</span><span class="workflow-step-t">Engage · keep scrolling</span></li>
+                                    </ol>
+                                </div>
+                            </article>
+                            <article class="workflow-row">
+                                <button id="open-instagram-cold-dms" class="workflow-tile" type="button">
+                                    <span class="workflow-tile-title">Cold DMs</span>
+                                    <span class="workflow-tile-desc">Lead list or handles · compose &amp; send</span>
+                                </button>
+                                <div class="workflow-how" aria-label="How Cold DMs work">
+                                    <p class="workflow-how-label">How it works</p>
+                                    <ol class="workflow-steps">
+                                        <li><span class="workflow-step-n">1</span><span class="workflow-step-t">Open Instagram</span></li>
+                                        <li><span class="workflow-step-n">2</span><span class="workflow-step-t">Load lead list</span></li>
+                                        <li><span class="workflow-step-n">3</span><span class="workflow-step-t">Open their profile</span></li>
+                                        <li><span class="workflow-step-n">4</span><span class="workflow-step-t">Compose · send</span></li>
+                                    </ol>
+                                </div>
+                            </article>
+                        </div>
+                    </div>
+
+                    <div class="workflow-group" data-platform="linkedin" hidden>
                         <div class="workflow-rows">
                             <article class="workflow-row">
                                 <button id="open-linkedin-cold-connect" class="workflow-tile" type="button">
@@ -205,14 +247,6 @@
                                 </div>
                             </article>
                         </div>
-                    </div>
-
-                    <div class="workflow-group trained-workflows">
-                        <div class="section-heading">
-                            <div><span class="eyebrow">Trained</span><h3 class="workflow-group-heading">Custom patterns</h3></div>
-                            <button id="refresh-workflows" class="icon-button" type="button">Refresh</button>
-                        </div>
-                        <div id="workflow-list" class="task-list workflow-list-compact loading-card"><span class="spinner" aria-hidden="true"></span>Loading…</div>
                     </div>
                 </section>
 

@@ -482,8 +482,42 @@ button:disabled { cursor: wait; opacity: .55; transform: none; }
 }
 .action-stack { display: grid; gap: 12px; }
 .workflows-panel { padding-bottom: 16px; }
-.workflows-lead { margin: -6px 0 4px; font-size: 13px; }
-.workflow-group { margin-top: 14px; }
+.workflows-lead { margin: 0 0 12px; font-size: 13px; }
+.platform-switch {
+    display: flex;
+    gap: 4px;
+    margin: -4px 0 12px;
+    padding: 4px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: rgb(255 255 255 / 2.5%);
+}
+.platform-switch-btn {
+    flex: 1;
+    min-height: 34px;
+    padding: 0 10px;
+    border: 0;
+    border-radius: 9px;
+    background: transparent;
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 650;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    cursor: pointer;
+}
+.platform-switch-btn:hover { color: var(--text); background: rgb(255 255 255 / 4%); }
+.platform-switch-btn[aria-selected="true"] {
+    background: var(--accent-grad);
+    color: #fff;
+    box-shadow: 0 6px 18px rgb(255 65 108 / 28%);
+}
+.platform-switch-btn:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+.workflow-group { margin-top: 0; }
+.workflow-group[hidden] { display: none; }
 .workflow-group-label {
     margin: 0 0 8px;
     color: var(--accent);
@@ -619,7 +653,7 @@ button:disabled { cursor: wait; opacity: .55; transform: none; }
     line-height: 1.35;
 }
 .trained-workflows {
-    margin-top: 16px;
+    margin-top: 14px;
     padding-top: 14px;
     border-top: 1px solid var(--border);
 }
