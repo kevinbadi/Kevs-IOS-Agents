@@ -21,6 +21,7 @@
     ".": "./src/index.ts",
     "./tiktok": "./src/tiktok-plugin.ts",
     "./instagram": "./src/instagram-plugin.ts",
+    "./linkedin": "./src/linkedin-plugin.ts",
     "./example-plugin": "./src/example-plugin.ts",
     "./server": "./src/api/server.ts",
     "./worker": "./src/scheduler/worker.ts"
@@ -38,6 +39,9 @@
     "web": "node --env-file-if-exists=.env --env-file-if-exists=.env.devices --import tsx src/api/server.ts",
     "instagram:leads:import": "node --env-file-if-exists=.env --import tsx src/instagram/leads-import.ts",
     "hinge:shadow": "node --env-file-if-exists=.env --env-file-if-exists=.env.devices --import tsx src/hinge/shadow.ts",
+    "linkedin:tour": "node --env-file-if-exists=.env --env-file-if-exists=.env.devices --import tsx src/linkedin/tour.ts",
+    "linkedin:cold-connect": "node --env-file-if-exists=.env --env-file-if-exists=.env.devices --import tsx src/linkedin/cold-connect.ts",
+    "linkedin:connect": "node --env-file-if-exists=.env --env-file-if-exists=.env.devices --import tsx src/linkedin/connect.ts",
     "build:web": "tsc -p tsconfig.web.json",
     "preweb": "npm run build:web",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.web.json --noEmit",

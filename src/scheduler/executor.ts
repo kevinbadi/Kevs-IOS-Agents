@@ -20,19 +20,64 @@ async function endpointReady(url: string): Promise<boolean> {
     }
 }
 
-async function waitForDevice(execution: ExecutionRow, registered: RegisteredDevice, signal: AbortSignal): Promise<Device> {
+/** Why the worker cannot start the task yet — logged so the dashboard is not stuck on “Waiting for worker output…”. */
+export function deviceWaitProblem(options: {
+    deviceFound: boolean;
+    wdaReady: boolean;
+    appiumReady: boolean;
+    wdaPort: number;
+    appiumPort: number;
+}): string | undefined {
+    if (!options.deviceFound) return 'device is offline';
+    if (!options.wdaReady) return `WDA is unavailable on port ${options.wdaPort}`;
+    if (!options.appiumReady) return `Appium is unavailable on port ${options.appiumPort}`;
+    return undefined;
+}
+
+function delay(milliseconds: number, signal: AbortSignal): Promise<void> {
+    return new Promise((resolve, reject) => {
+        if (signal.aborted) {
+            reject(new Error('Execution stopped while waiting for the device'));
+            return;
+        }
+        const timer = setTimeout(() => {
+            signal.removeEventListener('abort', onAbort);
+            resolve();
+        }, milliseconds);
+        const onAbort = () => {
+            clearTimeout(timer);
+            reject(new Error('Execution stopped while waiting for the device'));
+        };
+        signal.addEventListener('abort', onAbort, { once: true });
+    });
+}
+
+async function waitForDevice(
+    execution: ExecutionRow,
+    registered: RegisteredDevice,
+    signal: AbortSignal,
+    onWait: (problem: string) => Promise<void>,
+): Promise<Device> {
     const wdaPort = registered.wdaLocalPort ?? Number(process.env.WDA_LOCAL_PORT ?? 8100);
     const appiumHost = process.env.APPIUM_HOST ?? '127.0.0.1';
     const appiumPort = Number(process.env.APPIUM_PORT ?? 4725);
     let lastProblem = 'device is offline';
+    let lastReported = '';
     while (Date.now() <= execution.deadlineAt.getTime()) {
         if (signal.aborted) throw new Error('Execution stopped while waiting for the device');
         const device = (await discoverConnectedDevices()).find(({ udid }) => udid === execution.deviceUdid);
-        if (!device) lastProblem = 'device is offline';
-        else if (!await endpointReady(`http://127.0.0.1:${wdaPort}/status`)) lastProblem = `WDA is unavailable on port ${wdaPort}`;
-        else if (!await endpointReady(`http://${appiumHost}:${appiumPort}/status`)) lastProblem = `Appium is unavailable on port ${appiumPort}`;
-        else return device;
-        await new Promise((resolve) => setTimeout(resolve, 5_000));
+        const problem = deviceWaitProblem({
+            deviceFound: Boolean(device),
+            wdaReady: Boolean(device) && await endpointReady(`http://127.0.0.1:${wdaPort}/status`),
+            appiumReady: Boolean(device) && await endpointReady(`http://${appiumHost}:${appiumPort}/status`),
+            wdaPort,
+            appiumPort,
+        });
+        if (device && !problem) return device;
+        lastProblem = problem ?? lastProblem;
+        await onWait(lastProblem === lastReported ? '' : lastProblem);
+        lastReported = lastProblem;
+        await delay(5_000, signal);
     }
     throw new Error(`Execution window expired: ${lastProblem}`);
 }
@@ -139,7 +184,11 @@ export async function executeAutomation(
     }).catch(console.error), 1_000);
     let device: Device;
     try {
-        device = await waitForDevice(execution, registered, controller.signal);
+        await repository.appendLogs(execution.id, attempt, ['Checking that the device, WDA, and Appium are ready']);
+        device = await waitForDevice(execution, registered, controller.signal, async (problem) => {
+            if (problem) await repository.appendLogs(execution.id, attempt, [`Waiting for the device: ${problem}`]);
+            else await repository.touchRunning(execution.id);
+        });
     } catch (error) {
         clearInterval(stopPoll);
         signal.removeEventListener('abort', forwardAbort);

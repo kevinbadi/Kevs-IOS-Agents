@@ -38,7 +38,7 @@ interface PostRun {
 
 type SocialTaskType = 'doomscroll' | 'doomscroll-following' | 'post';
 type SocialPluginId = 'com.git-agni.tiktok' | 'com.git-agni.instagram' | string;
-type CalibrateApp = 'tiktok' | 'instagram';
+type CalibrateApp = 'tiktok' | 'instagram' | 'linkedin';
 
 interface DeviceSchedule {
     id: string;
@@ -231,9 +231,27 @@ const elements = {
     passcodeState: element<HTMLElement>('#passcode-state'),
     passcodeResult: element<HTMLElement>('#passcode-result'),
     openCalibrate: element<HTMLButtonElement>('#open-calibrate'),
+    openLinkedInColdConnect: element<HTMLButtonElement>('#open-linkedin-cold-connect'),
+    openLinkedInConnect: element<HTMLButtonElement>('#open-linkedin-connect'),
+    linkedinConnectDialog: element<HTMLDialogElement>('#linkedin-connect-dialog'),
+    closeLinkedInConnect: element<HTMLButtonElement>('#close-linkedin-connect'),
+    cancelLinkedInConnect: element<HTMLButtonElement>('#cancel-linkedin-connect'),
+    linkedinConnectForm: element<HTMLFormElement>('#linkedin-connect-form'),
+    linkedinConnectLeadCsv: element<HTMLSelectElement>('#linkedin-connect-lead-csv'),
+    linkedinConnectResult: element<HTMLElement>('#linkedin-connect-result'),
+    linkedinConnectCalibrate: element<HTMLButtonElement>('#linkedin-connect-calibrate'),
+    linkedinColdConnectDialog: element<HTMLDialogElement>('#linkedin-cold-connect-dialog'),
+    closeLinkedInColdConnect: element<HTMLButtonElement>('#close-linkedin-cold-connect'),
+    cancelLinkedInColdConnect: element<HTMLButtonElement>('#cancel-linkedin-cold-connect'),
+    linkedinColdConnectForm: element<HTMLFormElement>('#linkedin-cold-connect-form'),
+    linkedinColdConnectLeadCsv: element<HTMLSelectElement>('#linkedin-cold-connect-lead-csv'),
+    linkedinColdConnectResult: element<HTMLElement>('#linkedin-cold-connect-result'),
+    linkedinColdConnectCalibrate: element<HTMLButtonElement>('#linkedin-cold-connect-calibrate'),
     calibrateDialog: element<HTMLDialogElement>('#calibrate-dialog'),
     closeCalibrate: element<HTMLButtonElement>('#close-calibrate'),
     calApp: element<HTMLSelectElement>('#cal-app'),
+    calWorkflow: element<HTMLSelectElement>('#cal-workflow'),
+    calWorkflowWrap: element<HTMLElement>('#cal-workflow-wrap'),
     calScreen: element<HTMLImageElement>('#cal-screen'),
     calControl: element<HTMLInputElement>('#cal-control'),
     calUnlock: element<HTMLButtonElement>('#cal-unlock'),
@@ -1232,15 +1250,28 @@ elements.instagramAccountsForm.addEventListener('submit', async (event) => {
 
 interface CalPoint { name: string; label: string; default: Point; current: Point; overridden: boolean }
 
+function calAppLabel(app: CalibrateApp): string {
+    if (app === 'instagram') return 'Instagram';
+    if (app === 'linkedin') return 'LinkedIn';
+    return 'TikTok';
+}
+
+function calSaveBody(app: CalibrateApp, overrides: Record<string, { x: number; y: number }>): Record<string, unknown> {
+    if (app === 'instagram') return { instagramCoordinates: overrides };
+    if (app === 'linkedin') return { linkedinCoordinates: overrides };
+    return { coordinates: overrides };
+}
+
 const cal = {
     app: 'tiktok' as CalibrateApp,
     screen: undefined as { width: number; height: number } | undefined,
     points: [] as CalPoint[],
     overrides: {} as Record<string, { x: number; y: number }>,
-    /** Keep unsaved per-app edits when switching TikTok ↔ Instagram. */
+    /** Keep unsaved per-app edits when switching TikTok ↔ Instagram ↔ LinkedIn. */
     overridesByApp: {
         tiktok: {} as Record<string, { x: number; y: number }>,
         instagram: {} as Record<string, { x: number; y: number }>,
+        linkedin: {} as Record<string, { x: number; y: number }>,
     },
     armed: undefined as string | undefined,
     dirty: false,
@@ -1302,18 +1333,30 @@ function renderCal(): void {
     renderCalMarkers();
 }
 
-async function loadCalibratePoints(app: CalibrateApp): Promise<void> {
+type LinkedInWorkflowId = 'all' | 'cold-connect' | 'connect';
+
+async function loadCalibratePoints(app: CalibrateApp, workflow?: LinkedInWorkflowId): Promise<void> {
     // Stash in-progress edits for the app we're leaving so switching
-    // TikTok ↔ Instagram does not throw away unsaved Instagram points.
+    // TikTok ↔ Instagram ↔ LinkedIn does not throw away unsaved points.
     if (cal.points.length > 0) {
         cal.overridesByApp[cal.app] = { ...cal.overrides };
     }
+    const query = new URLSearchParams({ app });
+    if (app === 'linkedin') {
+        const selected = workflow ?? (elements.calWorkflow.value as LinkedInWorkflowId) ?? 'cold-connect';
+        elements.calWorkflow.value = selected;
+        query.set('workflow', selected);
+        elements.calWorkflowWrap.hidden = false;
+    } else {
+        elements.calWorkflowWrap.hidden = true;
+    }
     const data = await jsonRequest<{
         app: CalibrateApp;
+        workflow?: LinkedInWorkflowId;
         profile: string;
         screenSize: { width: number; height: number };
         points: CalPoint[];
-    }>(`/api/devices/${encodeURIComponent(udid)}/coordinates?app=${encodeURIComponent(app)}`);
+    }>(`/api/devices/${encodeURIComponent(udid)}/coordinates?${query.toString()}`);
     cal.app = data.app;
     cal.screen = data.screenSize;
     cal.points = data.points;
@@ -1325,18 +1368,27 @@ async function loadCalibratePoints(app: CalibrateApp): Promise<void> {
     cal.overridesByApp[app] = { ...cal.overrides };
     cal.armed = undefined;
     elements.calApp.value = data.app;
-    elements.calProfile.textContent = `${data.profile} · ${data.app === 'instagram' ? 'Instagram' : 'TikTok'}`;
-    elements.calSave.textContent = data.app === 'instagram' ? 'Save Instagram' : 'Save TikTok';
+    const workflowLabel = data.workflow && data.workflow !== 'all' ? ` · ${data.workflow}` : '';
+    elements.calProfile.textContent = `${data.profile} · ${calAppLabel(data.app)}${workflowLabel}`;
+    elements.calSave.textContent = `Save ${calAppLabel(data.app)}`;
     renderCal();
 }
 
-async function openCalibrate(): Promise<void> {
+async function openCalibrate(opts?: { app?: CalibrateApp; workflow?: LinkedInWorkflowId }): Promise<void> {
     elements.calStatus.textContent = 'Loading…';
     elements.calibrateDialog.showModal();
     try {
         elements.calControl.checked = false;
         elements.calScreen.parentElement?.classList.remove('controlling');
-        await loadCalibratePoints(elements.calApp.value as CalibrateApp);
+        if (opts?.app) elements.calApp.value = opts.app;
+        if (opts?.workflow) elements.calWorkflow.value = opts.workflow;
+        else if (elements.calApp.value === 'linkedin' && !elements.calWorkflow.value) {
+            elements.calWorkflow.value = 'cold-connect';
+        }
+        await loadCalibratePoints(
+            elements.calApp.value as CalibrateApp,
+            elements.calApp.value === 'linkedin' ? elements.calWorkflow.value as LinkedInWorkflowId : undefined,
+        );
         elements.calScreen.src = `/api/devices/${encodeURIComponent(udid)}/remote/stream?t=${Date.now()}`;
         elements.calStatus.textContent = '';
     } catch (error) {
@@ -1354,8 +1406,16 @@ elements.closeCalibrate.addEventListener('click', closeCalibrate);
 elements.calCancel.addEventListener('click', closeCalibrate);
 elements.calApp.addEventListener('change', () => {
     if (!elements.calibrateDialog.open) return;
+    if (elements.calApp.value === 'linkedin') elements.calWorkflow.value = 'cold-connect';
     elements.calStatus.textContent = 'Loading…';
     void loadCalibratePoints(elements.calApp.value as CalibrateApp)
+        .then(() => { elements.calStatus.textContent = ''; })
+        .catch((error) => { elements.calStatus.textContent = errorMessage(error); });
+});
+elements.calWorkflow.addEventListener('change', () => {
+    if (!elements.calibrateDialog.open) return;
+    elements.calStatus.textContent = 'Loading…';
+    void loadCalibratePoints('linkedin', elements.calWorkflow.value as LinkedInWorkflowId)
         .then(() => { elements.calStatus.textContent = ''; })
         .catch((error) => { elements.calStatus.textContent = errorMessage(error); });
 });
@@ -1403,7 +1463,7 @@ elements.openRemove.addEventListener('click', () => {
 });
 elements.closeRemove.addEventListener('click', () => elements.removeDialog.close());
 elements.calResetAll.addEventListener('click', () => {
-    if (!confirm(`Reset all ${cal.app === 'instagram' ? 'Instagram' : 'TikTok'} touch points to the profile defaults?`)) return;
+    if (!confirm(`Reset all ${calAppLabel(cal.app)} touch points to the profile defaults?`)) return;
     cal.overrides = {};
     cal.overridesByApp[cal.app] = {};
     cal.armed = undefined;
@@ -1466,14 +1526,12 @@ elements.calScreen.addEventListener('pointerup', (event) => {
 elements.calScreen.addEventListener('pointercancel', () => { calPointerStart = undefined; });
 elements.calSave.addEventListener('click', async () => {
     elements.calSave.disabled = true;
-    const appLabel = cal.app === 'instagram' ? 'Instagram' : 'TikTok';
+    const appLabel = calAppLabel(cal.app);
     elements.calStatus.textContent = `Saving ${appLabel}…`;
     try {
         // Snapshot current edits into the per-app bag before PATCH.
         cal.overridesByApp[cal.app] = { ...cal.overrides };
-        const body = cal.app === 'instagram'
-            ? { instagramCoordinates: cal.overrides }
-            : { coordinates: cal.overrides };
+        const body = calSaveBody(cal.app, cal.overrides);
         // Empty object clears this app's overrides (Reset all → Save).
         await jsonRequest(`/api/devices/${encodeURIComponent(udid)}`, {
             method: 'PATCH',
@@ -1887,6 +1945,83 @@ elements.instagramColdDmsForm.addEventListener('htmx:afterRequest', ((event: Cus
         void loadDeviceTasks();
     } else {
         elements.instagramColdDmsResult.textContent = detail.xhr?.responseText
+            ? 'Could not start — check Activity.'
+            : 'Request failed.';
+    }
+}) as EventListener);
+
+interface LinkedInLeadCsvSummary {
+    name: string;
+    total: number;
+    sent: number;
+    remaining: number;
+}
+
+async function loadLinkedInLeadCsvs(select: HTMLSelectElement, preferred?: string): Promise<void> {
+    const previous = select.value || preferred || '';
+    try {
+        const response = await fetch('/api/linkedin/leads');
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const result = await response.json() as { lists: LinkedInLeadCsvSummary[] };
+        select.replaceChildren();
+        if (result.lists.length === 0) {
+            select.add(new Option('No lead lists found', ''));
+            select.required = true;
+            return;
+        }
+        for (const list of result.lists) {
+            select.add(new Option(`${list.name}.csv · ${list.remaining} left of ${list.total}`, list.name));
+        }
+        if (result.lists.some((list) => list.name === previous)) select.value = previous;
+        else if (preferred && result.lists.some((list) => list.name === preferred)) select.value = preferred;
+    } catch {
+        if (select.options.length === 0) select.add(new Option('Could not load lead lists', ''));
+    }
+}
+
+elements.openLinkedInConnect.addEventListener('click', () => {
+    elements.linkedinConnectResult.textContent = '';
+    void loadLinkedInLeadCsvs(elements.linkedinConnectLeadCsv, 'hormozi');
+    elements.linkedinConnectDialog.showModal();
+});
+elements.closeLinkedInConnect.addEventListener('click', () => elements.linkedinConnectDialog.close());
+elements.cancelLinkedInConnect.addEventListener('click', () => elements.linkedinConnectDialog.close());
+elements.linkedinConnectCalibrate.addEventListener('click', () => {
+    elements.linkedinConnectDialog.close();
+    void openCalibrate({ app: 'linkedin', workflow: 'connect' });
+});
+elements.linkedinConnectForm.addEventListener('htmx:afterRequest', ((event: CustomEvent) => {
+    const detail = event.detail as { successful?: boolean; xhr?: XMLHttpRequest };
+    if (detail.successful) {
+        elements.linkedinConnectResult.textContent = 'Started.';
+        elements.linkedinConnectDialog.close();
+        void loadDeviceTasks();
+    } else {
+        elements.linkedinConnectResult.textContent = detail.xhr?.responseText
+            ? 'Could not start — check Activity.'
+            : 'Request failed.';
+    }
+}) as EventListener);
+
+elements.openLinkedInColdConnect.addEventListener('click', () => {
+    elements.linkedinColdConnectResult.textContent = '';
+    void loadLinkedInLeadCsvs(elements.linkedinColdConnectLeadCsv, 'result');
+    elements.linkedinColdConnectDialog.showModal();
+});
+elements.closeLinkedInColdConnect.addEventListener('click', () => elements.linkedinColdConnectDialog.close());
+elements.cancelLinkedInColdConnect.addEventListener('click', () => elements.linkedinColdConnectDialog.close());
+elements.linkedinColdConnectCalibrate.addEventListener('click', () => {
+    elements.linkedinColdConnectDialog.close();
+    void openCalibrate({ app: 'linkedin', workflow: 'cold-connect' });
+});
+elements.linkedinColdConnectForm.addEventListener('htmx:afterRequest', ((event: CustomEvent) => {
+    const detail = event.detail as { successful?: boolean; xhr?: XMLHttpRequest };
+    if (detail.successful) {
+        elements.linkedinColdConnectResult.textContent = 'Started.';
+        elements.linkedinColdConnectDialog.close();
+        void loadDeviceTasks();
+    } else {
+        elements.linkedinColdConnectResult.textContent = detail.xhr?.responseText
             ? 'Could not start — check Activity.'
             : 'Request failed.';
     }

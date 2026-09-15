@@ -11,9 +11,12 @@ import { Readable } from 'node:stream';
 import { discoverConnectedDevices } from '../devices/discovery.js';
 import { loadRegisteredDevices, mutateRegisteredDevices, saveRegisteredDevices, redactDevice, PASSCODE_PATTERN, type RegisteredDevice } from '../devices/registry.js';
 import {
-    CALIBRATABLE_POINTS, labelsForApp, coordinatesForProfile, resolveDeviceCoordinates,
-    validateCoordinateOverrides, parseSocialApp,
+    calibratablePointsForApp, labelsForApp, coordinatesForProfile,
+    resolveDeviceCoordinates, validateCoordinateOverrides, parseSocialApp,
+    coordinateOverridesForDevice, type Point,
+    type LinkedInCoordinates, type SocialAppCoordinates,
 } from '../devices/coordinates.js';
+import { linkedinLabelsForWorkflow, linkedinPointsForWorkflow, parseLinkedInWorkflow } from '../linkedin/workflows.js';
 import { RegistryWdaRemoteControl } from '../devices/registry-remote.js';
 import type {
     DeviceRegistrationManager, RegistrationAction, RegistrationUpdate,
@@ -363,9 +366,9 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
             return reply.code(201).send(redactDevice(created));
         },
     );
-    app.patch<{ Params: { udid: string }; Body: { name?: string; wdaLocalPort?: number; mjpegLocalPort?: number; passcode?: string; coordinates?: unknown; instagramCoordinates?: unknown; disabled?: boolean; coordinateProfile?: string; pluginData?: Record<string, JsonObject> } }>(
+    app.patch<{ Params: { udid: string }; Body: { name?: string; wdaLocalPort?: number; mjpegLocalPort?: number; passcode?: string; coordinates?: unknown; instagramCoordinates?: unknown; linkedinCoordinates?: unknown; disabled?: boolean; coordinateProfile?: string; pluginData?: Record<string, JsonObject> } }>(
         '/api/devices/:udid', async (request, reply) => {
-            const { passcode, coordinates, instagramCoordinates, name, wdaLocalPort, mjpegLocalPort, disabled, coordinateProfile, pluginData } = request.body ?? {};
+            const { passcode, coordinates, instagramCoordinates, linkedinCoordinates, name, wdaLocalPort, mjpegLocalPort, disabled, coordinateProfile, pluginData } = request.body ?? {};
             if (passcode !== undefined && passcode !== '' && !PASSCODE_PATTERN.test(passcode)) {
                 return reply.code(400).send({ error: 'Device passcode must contain at least four digits' });
             }
@@ -397,11 +400,19 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
                     }
                 }
                 if (instagramCoordinates !== undefined) {
-                    const incoming = validateCoordinateOverrides(instagramCoordinates, device.coordinateProfile);
+                    const incoming = validateCoordinateOverrides(instagramCoordinates, device.coordinateProfile, 'instagram');
                     if (Object.keys(instagramCoordinates as object).length === 0) {
                         delete device.instagramCoordinates;
                     } else {
                         device.instagramCoordinates = { ...device.instagramCoordinates, ...incoming };
+                    }
+                }
+                if (linkedinCoordinates !== undefined) {
+                    const incoming = validateCoordinateOverrides(linkedinCoordinates, device.coordinateProfile, 'linkedin');
+                    if (Object.keys(linkedinCoordinates as object).length === 0) {
+                        delete device.linkedinCoordinates;
+                    } else {
+                        device.linkedinCoordinates = { ...device.linkedinCoordinates, ...incoming };
                     }
                 }
                 return device;
@@ -410,22 +421,38 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
             return redactDevice(updated);
         },
     );
-    app.get<{ Params: { udid: string }; Querystring: { app?: string } }>('/api/devices/:udid/coordinates', async (request, reply) => {
+    app.get<{ Params: { udid: string }; Querystring: { app?: string; workflow?: string } }>('/api/devices/:udid/coordinates', async (request, reply) => {
         const device = (await loadRegisteredDevices()).find(({ udid }) => udid === request.params.udid);
         if (!device) return reply.code(404).send({ error: 'Device not found' });
         const app = parseSocialApp(request.query.app);
-        const overrides = app === 'instagram' ? device.instagramCoordinates : device.coordinates;
-        const base = coordinatesForProfile(device.coordinateProfile)[app];
-        const effective = resolveDeviceCoordinates(device.coordinateProfile, overrides, app)[app];
-        const labels = labelsForApp(app);
+        let workflow: ReturnType<typeof parseLinkedInWorkflow> = 'all';
+        if (app === 'linkedin') {
+            try {
+                workflow = parseLinkedInWorkflow(request.query.workflow);
+            } catch (error) {
+                return reply.code(400).send({ error: error instanceof Error ? error.message : String(error) });
+            }
+        }
+        const overrides = coordinateOverridesForDevice(device, app);
+        const profileCoords = coordinatesForProfile(device.coordinateProfile);
+        const effective = resolveDeviceCoordinates(device.coordinateProfile, overrides, app);
+        const labels = app === 'linkedin' ? linkedinLabelsForWorkflow(workflow) : labelsForApp(app);
+        const names = app === 'linkedin' ? linkedinPointsForWorkflow(workflow) : calibratablePointsForApp(app);
+        const baseMap = app === 'linkedin' ? profileCoords.linkedin : profileCoords[app];
+        const currentMap = app === 'linkedin' ? effective.linkedin : effective[app];
+        const pointAt = (map: LinkedInCoordinates | SocialAppCoordinates, name: string): Point | undefined => (
+            (map as unknown as Record<string, Point | undefined>)[name]
+        );
         return {
             app,
+            workflow: app === 'linkedin' ? workflow : undefined,
             profile: device.coordinateProfile ?? 'iphone8',
-            screenSize: coordinatesForProfile(device.coordinateProfile).screenSize,
-            points: CALIBRATABLE_POINTS.map((name) => ({
-                name, label: labels[name],
-                default: base[name], current: effective[name],
-                overridden: Boolean(overrides?.[name]),
+            screenSize: profileCoords.screenSize,
+            points: names.map((name) => ({
+                name, label: labels[name] ?? name,
+                default: pointAt(baseMap, name),
+                current: pointAt(currentMap, name),
+                overridden: Boolean(overrides?.[name as keyof typeof overrides]),
             })),
         };
     });

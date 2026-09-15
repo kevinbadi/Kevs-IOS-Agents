@@ -9,13 +9,22 @@ export * from './loader.js';
 export * from './security.js';
 export * from './tiktok-plugin.js';
 export * from './instagram-plugin.js';
+export * from './linkedin-plugin.js';
 export * from './dashboard-theme.js';
 export { activeDevices, loadRegisteredDevices, saveRegisteredDevices } from './devices/registry.js';
 export {
     CALIBRATABLE_POINTS, POINT_LABELS, TIKTOK_POINT_LABELS, INSTAGRAM_POINT_LABELS, labelsForApp,
-    resolveDeviceCoordinates, validateCoordinateOverrides, parseSocialApp,
-    type CalibratablePoint, type DeviceCoordinateOverrides, type SocialAppName, type SocialAppCoordinates,
+    calibratablePointsForApp, coordinateOverridesForDevice,
+    resolveDeviceCoordinates, validateCoordinateOverrides, parseSocialApp, parseCalibrateApp,
+    LINKEDIN_BUNDLE_ID, LINKEDIN_CALIBRATABLE_POINTS, LINKEDIN_POINT_LABELS,
+    type CalibratablePoint, type CalibrateApp, type DeviceCoordinateOverrides,
+    type SocialAppName, type SocialAppCoordinates, type LinkedInCoordinates, type LinkedInCalibratablePoint,
 } from './devices/coordinates.js';
+export {
+    LINKEDIN_COLD_CONNECT, LINKEDIN_CONNECT, LINKEDIN_WORKFLOWS, parseLinkedInWorkflow,
+    linkedinPointsForWorkflow, linkedinLabelsForWorkflow,
+    type LinkedInWorkflowId,
+} from './linkedin/workflows.js';
 export {
     DeviceRegistrationService,
     allocateDevicePorts,
