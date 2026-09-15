@@ -7,6 +7,7 @@ import { createSchedulerRuntime } from '../scheduler/runtime.js';
 import { assertSafeBind } from '../security.js';
 import { createTikTokPlugin } from '../tiktok-plugin.js';
 import { createInstagramPlugin } from '../instagram-plugin.js';
+import { createLinkedInPlugin } from '../linkedin-plugin.js';
 import { defaultDashboardTheme } from '../dashboard-theme.js';
 import { DeviceRegistrationService } from '../devices/registration.js';
 import { createApp, type DashboardTheme } from './app.js';
@@ -23,6 +24,7 @@ export async function defaultPlugins(): Promise<PhoneFarmPlugin[]> {
     return [
         createTikTokPlugin({ bundleId: process.env.TIKTOK_BUNDLE_ID }),
         createInstagramPlugin({ bundleId: process.env.INSTAGRAM_BUNDLE_ID }),
+        createLinkedInPlugin({ bundleId: process.env.LINKEDIN_BUNDLE_ID }),
         ...await loadPlugins(configuredPluginModules()),
     ];
 }

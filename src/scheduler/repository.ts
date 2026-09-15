@@ -214,6 +214,15 @@ export class SchedulerRepository {
                 };
                 const definition = this.plugins.task(task);
                 const policy = definition.retryPolicy(task.payload);
+                // Interval drains (every 5 min) with a 7-minute wait window used
+                // to stack a second job behind a silent waitForDevice, which the
+                // dashboard showed as one hung queued task. Hold nextRunAt until
+                // the in-flight occurrence leaves queued/running.
+                const [inflight] = await tx.select({ id: executions.id }).from(executions).where(and(
+                    eq(executions.scheduleId, row.id),
+                    inArray(executions.status, ['queued', 'running']),
+                )).limit(1);
+                if (inflight) continue;
                 const [execution] = await tx.insert(executions).values({
                     scheduleId: row.id, deviceUdid: row.device_udid,
                     pluginId: row.plugin_id, taskType: row.task_type, taskVersion: row.task_version, payload: row.payload,
@@ -250,6 +259,11 @@ export class SchedulerRepository {
         if (!lines.length) return;
         await this.connection.db.insert(executionLogs).values(lines.map((line) => ({ executionId: id, attempt, line })));
         // Heartbeat so reconcile does not treat a healthy long post as a zombie.
+        await this.touchRunning(id);
+    }
+
+    /** Keep a running execution alive across wait-for-device polls that have nothing new to log. */
+    async touchRunning(id: string): Promise<void> {
         await this.connection.db.update(executions).set({ updatedAt: new Date() })
             .where(and(eq(executions.id, id), eq(executions.status, 'running')));
     }
@@ -298,6 +312,18 @@ export class SchedulerRepository {
         if (!supportsStop) return 'unsupported';
         await this.connection.db.update(executions).set({ stopRequestedAt: new Date(), updatedAt: new Date() })
             .where(eq(executions.id, id));
+        // Abort the active pg-boss job so waitForDevice / runProcess see the
+        // signal immediately instead of sitting out the next 5s poll.
+        if (execution.queueJobId) {
+            try {
+                await this.boss.cancel(queueNameForDevice(execution.deviceUdid), execution.queueJobId);
+            } catch (error) {
+                console.error(
+                    `pg-boss cancel failed for running ${execution.id}:`,
+                    error instanceof Error ? error.message : error,
+                );
+            }
+        }
         return 'running';
     }
 

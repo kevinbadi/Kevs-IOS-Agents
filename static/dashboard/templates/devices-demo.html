@@ -30,7 +30,7 @@
     </header>
     <main class="shell shell-fleet">
         <div class="demo-banner" role="note">
-            <strong>Demo</strong> — mock fleet of 20 seats. Nothing here talks to real phones.
+            <strong>Demo</strong> — simulated live fleet. Screens animate locally; nothing talks to real phones.
             <a href="/">Back to live devices</a>
         </div>
 
@@ -38,13 +38,13 @@
             <div>
                 <span class="eyebrow">Fleet control</span>
                 <h1>Your <em>devices</em></h1>
-                <p>Twenty seats on one Mac — pick a phone to drive live or queue warmup, engagement, and posts.</p>
+                <p>Twenty seats on one Mac — watch warmup, engagement, and posts move across the rack in real time.</p>
             </div>
             <div class="fleet-stats" aria-label="Fleet summary">
-                <div class="fleet-stat"><span class="fleet-stat-value">20</span><span class="fleet-stat-label">Seats</span></div>
-                <div class="fleet-stat"><span class="fleet-stat-value">17</span><span class="fleet-stat-label">Online</span></div>
-                <div class="fleet-stat running"><span class="fleet-stat-value">3</span><span class="fleet-stat-label">Running</span></div>
-                <div class="fleet-stat offline"><span class="fleet-stat-value">3</span><span class="fleet-stat-label">Offline</span></div>
+                <div class="fleet-stat"><span class="fleet-stat-value" id="stat-seats">20</span><span class="fleet-stat-label">Seats</span></div>
+                <div class="fleet-stat"><span class="fleet-stat-value" id="stat-online">17</span><span class="fleet-stat-label">Online</span></div>
+                <div class="fleet-stat running"><span class="fleet-stat-value" id="stat-running">0</span><span class="fleet-stat-label">Running</span></div>
+                <div class="fleet-stat offline"><span class="fleet-stat-value" id="stat-offline">3</span><span class="fleet-stat-label">Offline</span></div>
             </div>
         </header>
 
@@ -63,81 +63,176 @@
     <footer class="app-footer">__FOOTER__</footer>
     <script>
         (function () {
-            var seats = [
-                { name: 'Seat 01', model: 'iPhone 17 Pro · iOS 26.6', status: 'online', screen: 'home', chip: 'Idle' },
-                { name: 'Seat 02', model: 'iPhone 17 Pro · iOS 26.6', status: 'running', screen: 'tiktok', chip: 'Warmup · 4:12', running: true },
-                { name: 'Seat 03', model: 'iPhone SE · iOS 18.5', status: 'online', screen: 'home', chip: 'Idle' },
-                { name: 'Seat 04', model: 'iPhone 13 · iOS 26.5', status: 'online', screen: 'lock', chip: 'Idle' },
-                { name: 'Seat 05', model: 'iPhone 17 Pro · iOS 26.6', status: 'online', screen: 'tiktok', chip: 'Queued' },
-                { name: 'Seat 06', model: 'iPhone 17 Pro · iOS 26.6', status: 'running', screen: 'tiktok', chip: 'Engagement · 11:40', running: true },
-                { name: 'Seat 07', model: 'iPhone SE · iOS 18.5', status: 'online', screen: 'home', chip: 'Idle' },
-                { name: 'Seat 08', model: 'iPhone 13 · iOS 26.5', status: 'online', screen: 'instagram', chip: 'Idle' },
-                { name: 'Seat 09', model: 'iPhone 17 Pro · iOS 26.6', status: 'online', screen: 'home', chip: 'Idle' },
-                { name: 'Seat 10', model: 'iPhone 17 Pro · iOS 26.6', status: 'running', screen: 'instagram', chip: 'IG Warmup · 2:08', running: true },
-                { name: 'Seat 11', model: 'iPhone SE · iOS 18.5', status: 'online', screen: 'lock', chip: 'Idle' },
-                { name: 'Seat 12', model: 'iPhone 13 · iOS 26.5', status: 'online', screen: 'home', chip: 'Idle' },
-                { name: 'Seat 13', model: 'iPhone 17 Pro · iOS 26.6', status: 'online', screen: 'tiktok', chip: 'Idle' },
-                { name: 'Seat 14', model: 'iPhone 17 Pro · iOS 26.6', status: 'online', screen: 'home', chip: 'Idle' },
-                { name: 'Seat 15', model: 'iPhone SE · iOS 18.5', status: 'online', screen: 'instagram', chip: 'Idle' },
-                { name: 'Seat 16', model: 'iPhone 13 · iOS 26.5', status: 'online', screen: 'home', chip: 'Idle' },
-                { name: 'Seat 17', model: 'iPhone 17 Pro · iOS 26.6', status: 'online', screen: 'tiktok', chip: 'Idle' },
-                { name: 'Seat 18', model: 'iPhone 17 Pro · unplugged', status: 'offline', screen: 'offline', chip: null },
-                { name: 'Seat 19', model: 'iPhone SE · cable fault', status: 'offline', screen: 'offline', chip: null },
-                { name: 'Seat 20', model: 'iPhone 13 · trust needed', status: 'offline', screen: 'offline', chip: null },
+            var creators = [
+                ['@creator', 'outlier hook'],
+                ['@postscroll.ai', 'hook test · take 3'],
+                ['@studio', 'new drop tonight'],
+                ['@kev.knows.ball', 'clip dump'],
+                ['@farm.ops', 'warmup pass'],
+                ['@signal.lab', 'save this angle'],
+                ['@night.shift', 'quiet scroll'],
+                ['@rack.01', 'engagement burst'],
+            ];
+            var jobs = [
+                { label: 'Warmup', screen: 'tiktok', min: 180, max: 420 },
+                { label: 'Engagement', screen: 'tiktok', min: 300, max: 720 },
+                { label: 'IG Warmup', screen: 'instagram', min: 120, max: 360 },
+                { label: 'IG Engage', screen: 'instagram', min: 240, max: 540 },
+                { label: 'Cold DMs', screen: 'instagram', min: 90, max: 210 },
             ];
 
-            function screenHtml(kind, hue) {
+            var seats = [
+                { name: 'Seat 01', model: 'iPhone 17 Pro · iOS 26.6', online: true, screen: 'home' },
+                { name: 'Seat 02', model: 'iPhone 17 Pro · iOS 26.6', online: true, screen: 'tiktok', job: 'Warmup', remain: 252 },
+                { name: 'Seat 03', model: 'iPhone SE · iOS 18.5', online: true, screen: 'home' },
+                { name: 'Seat 04', model: 'iPhone 13 · iOS 26.5', online: true, screen: 'lock' },
+                { name: 'Seat 05', model: 'iPhone 17 Pro · iOS 26.6', online: true, screen: 'tiktok', queued: 'Engagement' },
+                { name: 'Seat 06', model: 'iPhone 17 Pro · iOS 26.6', online: true, screen: 'tiktok', job: 'Engagement', remain: 700 },
+                { name: 'Seat 07', model: 'iPhone SE · iOS 18.5', online: true, screen: 'home' },
+                { name: 'Seat 08', model: 'iPhone 13 · iOS 26.5', online: true, screen: 'instagram' },
+                { name: 'Seat 09', model: 'iPhone 17 Pro · iOS 26.6', online: true, screen: 'home' },
+                { name: 'Seat 10', model: 'iPhone 17 Pro · iOS 26.6', online: true, screen: 'instagram', job: 'IG Warmup', remain: 128 },
+                { name: 'Seat 11', model: 'iPhone SE · iOS 18.5', online: true, screen: 'lock' },
+                { name: 'Seat 12', model: 'iPhone 13 · iOS 26.5', online: true, screen: 'home' },
+                { name: 'Seat 13', model: 'iPhone 17 Pro · iOS 26.6', online: true, screen: 'tiktok', job: 'Warmup', remain: 95 },
+                { name: 'Seat 14', model: 'iPhone 17 Pro · iOS 26.6', online: true, screen: 'home' },
+                { name: 'Seat 15', model: 'iPhone SE · iOS 18.5', online: true, screen: 'instagram', job: 'IG Engage', remain: 410 },
+                { name: 'Seat 16', model: 'iPhone 13 · iOS 26.5', online: true, screen: 'home' },
+                { name: 'Seat 17', model: 'iPhone 17 Pro · iOS 26.6', online: true, screen: 'tiktok', queued: 'Warmup' },
+                { name: 'Seat 18', model: 'iPhone 17 Pro · unplugged', online: false, screen: 'offline' },
+                { name: 'Seat 19', model: 'iPhone SE · cable fault', online: false, screen: 'offline' },
+                { name: 'Seat 20', model: 'iPhone 13 · trust needed', online: false, screen: 'offline' },
+            ];
+
+            function pad(n) { return String(n).padStart(2, '0'); }
+            function formatRemain(seconds) {
+                var m = Math.floor(Math.max(0, seconds) / 60);
+                var s = Math.max(0, seconds) % 60;
+                return m + ':' + pad(s);
+            }
+            function pick(list) { return list[Math.floor(Math.random() * list.length)]; }
+            function rand(min, max) { return min + Math.floor(Math.random() * (max - min + 1)); }
+
+            function statusOf(seat) {
+                if (!seat.online) return 'offline';
+                if (seat.job) return 'running';
+                return 'online';
+            }
+
+            function chipHtml(seat) {
+                if (!seat.online) return '<span class="connection-chip unavailable">Offline</span>';
+                if (seat.job) {
+                    return '<span class="connection-chip ready">Online</span>'
+                        + '<span class="connection-chip running" data-chip>'
+                        + seat.job + ' · <span data-remain>' + formatRemain(seat.remain || 0) + '</span></span>';
+                }
+                if (seat.queued) {
+                    return '<span class="connection-chip ready">Online</span>'
+                        + '<span class="connection-chip" data-chip>Queued · ' + seat.queued + '</span>';
+                }
+                return '<span class="connection-chip ready">Online</span>'
+                    + '<span class="connection-chip" data-chip>Idle</span>';
+            }
+
+            function captionHtml(seed) {
+                var pair = creators[seed % creators.length];
+                return '<div class="mock-feed-caption"><b>' + pair[0] + '</b><span data-caption>' + pair[1] + '</span></div>';
+            }
+
+            function liveFeedChrome(kind, seed) {
+                if (kind === 'instagram') {
+                    return '<div class="mock-ig-tabs"><span></span><span class="on"></span></div>'
+                        + captionHtml(seed)
+                        + '<div class="mock-rail"><i class="like"></i><i></i><i></i></div>'
+                        + '<div class="mock-tabbar ig"><span></span><span></span><span></span><span class="on"></span><span></span></div>';
+                }
+                return '<div class="mock-tt-tabs"><span>Following</span><span class="on">For You</span></div>'
+                    + captionHtml(seed)
+                    + '<div class="mock-rail"><i class="like"></i><i></i><i></i><i></i></div>'
+                    + '<div class="mock-tabbar tt"><span class="on"></span><span></span><span class="plus"></span><span></span><span></span></div>';
+            }
+
+            function screenHtml(seat, index) {
+                var hue = 200 + index * 17;
+                var kind = seat.screen;
+                var live = Boolean(seat.job);
                 if (kind === 'offline') {
                     return '<div class="mock-screen mock-offline"><div class="mock-status"></div><div class="mock-offline-mark"></div><span class="mock-offline-label">No signal</span></div>';
                 }
                 if (kind === 'lock') {
-                    return '<div class="mock-screen mock-lock" style="--hue:' + hue + '"><div class="mock-status light"></div><div class="mock-lock-time">9:41</div><div class="mock-lock-date">Thu Sep 10</div><div class="mock-lock-flash"></div></div>';
+                    return '<div class="mock-screen mock-lock" style="--hue:' + hue + '"><div class="mock-status light"></div>'
+                        + '<div class="mock-lock-time" data-clock>9:41</div>'
+                        + '<div class="mock-lock-date" data-date>Thu Sep 10</div>'
+                        + '<div class="mock-lock-flash"></div></div>';
                 }
                 if (kind === 'home') {
-                    return '<div class="mock-screen mock-home" style="--hue:' + hue + '"><div class="mock-status light"></div><div class="mock-icons">'
+                    return '<div class="mock-screen mock-home' + (live ? ' is-live' : '') + '" style="--hue:' + hue + '">'
+                        + '<div class="mock-status light"></div><div class="mock-icons">'
                         + '<span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>'
                         + '</div><div class="mock-dock"><span></span><span></span><span></span><span></span></div></div>';
                 }
-                if (kind === 'instagram') {
-                    return '<div class="mock-screen mock-ig" style="--hue:' + hue + '"><div class="mock-status"></div>'
-                        + '<div class="mock-ig-tabs"><span></span><span class="on"></span></div>'
-                        + '<div class="mock-feed-caption"><b>@studio</b> new drop</div>'
-                        + '<div class="mock-rail"><i></i><i></i><i></i></div>'
-                        + '<div class="mock-tabbar ig"><span></span><span></span><span></span><span class="on"></span><span></span></div></div>';
-                }
-                return '<div class="mock-screen mock-tiktok" style="--hue:' + hue + '"><div class="mock-status"></div>'
-                    + '<div class="mock-tt-tabs"><span>Following</span><span class="on">For You</span></div>'
-                    + '<div class="mock-feed-caption"><b>@creator</b> outlier hook</div>'
-                    + '<div class="mock-rail"><i></i><i></i><i></i><i></i></div>'
-                    + '<div class="mock-tabbar tt"><span class="on"></span><span></span><span class="plus"></span><span></span><span></span></div></div>';
+                var cls = kind === 'instagram' ? 'mock-ig' : 'mock-tiktok';
+                return '<div class="mock-screen ' + cls + (live ? ' is-live' : ' is-ambient') + '" style="--hue:' + hue + '">'
+                    + '<div class="mock-status"></div>'
+                    + '<div class="mock-feed-stage" aria-hidden="true">'
+                    + '<div class="mock-feed-slide a"></div>'
+                    + '<div class="mock-feed-slide b"></div>'
+                    + '</div>'
+                    + liveFeedChrome(kind, index)
+                    + '<span class="mock-tap" aria-hidden="true"></span>'
+                    + '<span class="mock-heart" aria-hidden="true"></span>'
+                    + (live ? '<div class="mock-agent-bar"><span class="mock-agent-fill"></span></div>' : '')
+                    + '</div>';
             }
 
             function phoneHtml(seat, index) {
-                var hue = 200 + index * 17;
                 return '<div class="fleet-phone" aria-hidden="true">'
                     + '<div class="fleet-bezel">'
                     + '<span class="fleet-dynamic-island"></span>'
-                    + screenHtml(seat.screen, hue)
+                    + screenHtml(seat, index)
                     + '</div></div>';
             }
 
-            var grid = document.getElementById('fleet-grid');
-            grid.innerHTML = seats.map(function (seat, index) {
-                var chips = seat.status === 'offline'
-                    ? '<span class="connection-chip unavailable">Offline</span>'
-                    : '<span class="connection-chip ready">Online</span><span class="connection-chip'
-                        + (seat.running ? ' running' : '') + '">' + seat.chip + '</span>';
-                return '<article class="fleet-tile" data-status="' + seat.status + '">'
+            function renderTile(seat, index) {
+                var status = statusOf(seat);
+                return '<article class="fleet-tile" data-status="' + status + '" data-seat="' + index + '">'
                     + phoneHtml(seat, index)
                     + '<div class="fleet-copy"><h2>' + seat.name + '</h2><p>' + seat.model + '</p>'
-                    + '<div class="fleet-chips">' + chips + '</div></div>'
+                    + '<div class="fleet-chips">' + chipHtml(seat) + '</div></div>'
                     + '<a class="button secondary fleet-open" href="#">Open →</a></article>';
-            }).join('');
+            }
 
-            var filters = document.querySelectorAll('.fleet-filter');
-            var tiles = Array.prototype.slice.call(document.querySelectorAll('.fleet-tile'));
-            var count = document.getElementById('fleet-visible-count');
-            function apply(filter) {
+            var grid = document.getElementById('fleet-grid');
+            var activeFilter = 'all';
+
+            function paint() {
+                grid.innerHTML = seats.map(renderTile).join('');
+                document.querySelectorAll('.fleet-open').forEach(function (link) {
+                    link.addEventListener('click', function (event) { event.preventDefault(); });
+                });
+                applyFilter(activeFilter);
+                updateStats();
+                syncClocks();
+            }
+
+            function updateStats() {
+                var online = 0, running = 0, offline = 0;
+                seats.forEach(function (seat) {
+                    if (!seat.online) offline += 1;
+                    else {
+                        online += 1;
+                        if (seat.job) running += 1;
+                    }
+                });
+                document.getElementById('stat-seats').textContent = String(seats.length);
+                document.getElementById('stat-online').textContent = String(online);
+                document.getElementById('stat-running').textContent = String(running);
+                document.getElementById('stat-offline').textContent = String(offline);
+            }
+
+            function applyFilter(filter) {
+                activeFilter = filter;
+                var tiles = Array.prototype.slice.call(document.querySelectorAll('.fleet-tile'));
                 var visible = 0;
                 tiles.forEach(function (tile) {
                     var status = tile.getAttribute('data-status');
@@ -147,17 +242,177 @@
                     tile.hidden = !show;
                     if (show) visible += 1;
                 });
-                count.textContent = 'Showing ' + visible + ' seat' + (visible === 1 ? '' : 's');
+                document.getElementById('fleet-visible-count').textContent =
+                    'Showing ' + visible + ' seat' + (visible === 1 ? '' : 's');
             }
-            filters.forEach(function (button) {
+
+            document.querySelectorAll('.fleet-filter').forEach(function (button) {
                 button.addEventListener('click', function () {
-                    filters.forEach(function (entry) { entry.classList.toggle('is-active', entry === button); });
-                    apply(button.getAttribute('data-filter'));
+                    document.querySelectorAll('.fleet-filter').forEach(function (entry) {
+                        entry.classList.toggle('is-active', entry === button);
+                    });
+                    applyFilter(button.getAttribute('data-filter'));
                 });
             });
-            document.querySelectorAll('.fleet-open').forEach(function (link) {
-                link.addEventListener('click', function (event) { event.preventDefault(); });
-            });
+
+            function syncClocks() {
+                var now = new Date();
+                var time = ((now.getHours() % 12) || 12) + ':' + pad(now.getMinutes());
+                var date = now.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+                document.querySelectorAll('[data-clock]').forEach(function (node) { node.textContent = time; });
+                document.querySelectorAll('[data-date]').forEach(function (node) { node.textContent = date; });
+            }
+
+            function refreshChips() {
+                document.querySelectorAll('.fleet-tile').forEach(function (tile) {
+                    var index = Number(tile.getAttribute('data-seat'));
+                    var seat = seats[index];
+                    if (!seat) return;
+                    var chips = tile.querySelector('.fleet-chips');
+                    if (chips) chips.innerHTML = chipHtml(seat);
+                    tile.setAttribute('data-status', statusOf(seat));
+                    var screen = tile.querySelector('.mock-screen');
+                    if (!screen || screen.classList.contains('mock-offline') || screen.classList.contains('mock-lock') || screen.classList.contains('mock-home')) return;
+                    screen.classList.toggle('is-live', Boolean(seat.job));
+                    screen.classList.toggle('is-ambient', !seat.job);
+                    var bar = screen.querySelector('.mock-agent-bar');
+                    if (seat.job && !bar) {
+                        var el = document.createElement('div');
+                        el.className = 'mock-agent-bar';
+                        el.innerHTML = '<span class="mock-agent-fill"></span>';
+                        screen.appendChild(el);
+                    } else if (!seat.job && bar) {
+                        bar.remove();
+                    }
+                });
+                applyFilter(activeFilter);
+                updateStats();
+            }
+
+            function pulseTap(screen) {
+                if (!screen) return;
+                var tap = screen.querySelector('.mock-tap');
+                var heart = screen.querySelector('.mock-heart');
+                var like = screen.querySelector('.mock-rail .like');
+                if (!tap) return;
+                tap.classList.remove('pop');
+                void tap.offsetWidth;
+                tap.style.left = (48 + Math.random() * 30) + '%';
+                tap.style.top = (34 + Math.random() * 28) + '%';
+                tap.classList.add('pop');
+                if (Math.random() > 0.3 && heart) {
+                    heart.classList.remove('pop');
+                    void heart.offsetWidth;
+                    heart.classList.add('pop');
+                    if (like) {
+                        like.classList.remove('hit');
+                        void like.offsetWidth;
+                        like.classList.add('hit');
+                    }
+                }
+            }
+
+            function swipeFeed(screen, seatIndex) {
+                if (!screen) return;
+                screen.classList.remove('swiping');
+                void screen.offsetWidth;
+                screen.classList.add('swiping');
+                var pair = pick(creators);
+                var caption = screen.querySelector('[data-caption]');
+                var handle = screen.querySelector('.mock-feed-caption b');
+                if (handle) handle.textContent = pair[0];
+                if (caption) caption.textContent = pair[1];
+                var hue = 160 + ((seatIndex * 23) + Math.floor(Math.random() * 120)) % 180;
+                screen.style.setProperty('--hue', String(hue));
+                window.setTimeout(function () {
+                    screen.classList.remove('swiping');
+                    // Rotate slides so the next swipe still has a fresh "incoming" card.
+                    var a = screen.querySelector('.mock-feed-slide.a');
+                    var b = screen.querySelector('.mock-feed-slide.b');
+                    if (a && b) {
+                        a.classList.remove('a'); a.classList.add('b');
+                        b.classList.remove('b'); b.classList.add('a');
+                    }
+                }, 480);
+            }
+
+            function wakeHome(screen) {
+                if (!screen || !screen.classList.contains('mock-home')) return;
+                screen.classList.remove('is-waking');
+                void screen.offsetWidth;
+                screen.classList.add('is-waking');
+                window.setTimeout(function () { screen.classList.remove('is-waking'); }, 600);
+            }
+
+            function startJob(seat) {
+                var job = pick(jobs);
+                seat.job = job.label;
+                seat.remain = rand(job.min, job.max);
+                seat.queued = null;
+                seat.screen = job.screen;
+            }
+
+            function finishJob(seat) {
+                seat.job = null;
+                seat.remain = 0;
+                if (Math.random() > 0.5) {
+                    seat.queued = pick(jobs).label;
+                    seat.screen = seat.queued.indexOf('IG') === 0 || seat.queued === 'Cold DMs' ? 'instagram' : 'tiktok';
+                } else {
+                    seat.queued = null;
+                    seat.screen = pick(['home', 'home', 'lock', 'tiktok', 'instagram']);
+                }
+            }
+
+            var tick = 0;
+            function liveTick() {
+                tick += 1;
+                var needsPaint = false;
+                seats.forEach(function (seat, index) {
+                    if (!seat.online) return;
+                    var tile = document.querySelector('.fleet-tile[data-seat="' + index + '"]');
+                    var screen = tile && tile.querySelector('.mock-screen');
+                    if (seat.job) {
+                        // Count down about once per second even on a faster loop.
+                        if (tick % 2 === 0) seat.remain = Math.max(0, (seat.remain || 0) - 1);
+                        if (seat.remain <= 0) {
+                            finishJob(seat);
+                            needsPaint = true;
+                            return;
+                        }
+                        var remain = tile && tile.querySelector('[data-remain]');
+                        if (remain) remain.textContent = formatRemain(seat.remain);
+                        // Snappy swipe / engage cadence.
+                        if (screen && tick % (3 + (index % 2)) === 0) swipeFeed(screen, index);
+                        if (screen && tick % (2 + (index % 3)) === 0) pulseTap(screen);
+                    } else {
+                        // Ambient phones still move so the rack never feels frozen.
+                        if (screen && (screen.classList.contains('mock-tiktok') || screen.classList.contains('mock-ig'))) {
+                            if (tick % (7 + (index % 5)) === 0) swipeFeed(screen, index);
+                            if (tick % (9 + (index % 4)) === 0) pulseTap(screen);
+                        }
+                        if (screen && screen.classList.contains('mock-home') && tick % (10 + (index % 6)) === 0) {
+                            wakeHome(screen);
+                        }
+                        if (seat.queued && tick % (8 + (index % 5)) === index % (8 + (index % 5))) {
+                            startJob(seat);
+                            needsPaint = true;
+                        } else if (!seat.queued && tick % (22 + (index % 7)) === index % 11 && Math.random() > 0.35) {
+                            var running = seats.filter(function (s) { return s.job; }).length;
+                            if (running < 8) {
+                                startJob(seat);
+                                needsPaint = true;
+                            }
+                        }
+                    }
+                });
+                if (needsPaint) paint();
+                else refreshChips();
+                if (tick % 60 === 0) syncClocks();
+            }
+
+            paint();
+            window.setInterval(liveTick, 500);
         })();
     </script>
 </body>

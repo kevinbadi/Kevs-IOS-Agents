@@ -16,3 +16,5 @@ data/leads/state/
 
 # Hinge shadow-mode captures (screenshots of other people; keep local)
 data/hinge/
+# LinkedIn tour captures
+data/linkedin/

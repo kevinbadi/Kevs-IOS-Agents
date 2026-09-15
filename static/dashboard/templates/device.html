@@ -171,6 +171,42 @@
                         </div>
                     </div>
 
+                    <div class="workflow-group">
+                        <h3 class="workflow-group-label">LinkedIn</h3>
+                        <div class="workflow-rows">
+                            <article class="workflow-row">
+                                <button id="open-linkedin-cold-connect" class="workflow-tile" type="button">
+                                    <span class="workflow-tile-title">Cold connect</span>
+                                    <span class="workflow-tile-desc">5 connects per run · personalized note</span>
+                                </button>
+                                <div class="workflow-how" aria-label="How Cold connect works">
+                                    <p class="workflow-how-label">How it works</p>
+                                    <ol class="workflow-steps">
+                                        <li><span class="workflow-step-n">1</span><span class="workflow-step-t">Open LinkedIn</span></li>
+                                        <li><span class="workflow-step-n">2</span><span class="workflow-step-t">Tap Search (top middle)</span></li>
+                                        <li><span class="workflow-step-n">3</span><span class="workflow-step-t">Search the person</span></li>
+                                        <li><span class="workflow-step-n">4</span><span class="workflow-step-t">Menu · Connect · Add note · Send</span></li>
+                                    </ol>
+                                </div>
+                            </article>
+                            <article class="workflow-row">
+                                <button id="open-linkedin-connect" class="workflow-tile" type="button">
+                                    <span class="workflow-tile-title">Connection request</span>
+                                    <span class="workflow-tile-desc">5 connects per run · send without note</span>
+                                </button>
+                                <div class="workflow-how" aria-label="How Connection request works">
+                                    <p class="workflow-how-label">How it works</p>
+                                    <ol class="workflow-steps">
+                                        <li><span class="workflow-step-n">1</span><span class="workflow-step-t">Open LinkedIn</span></li>
+                                        <li><span class="workflow-step-n">2</span><span class="workflow-step-t">Tap Search (top middle)</span></li>
+                                        <li><span class="workflow-step-n">3</span><span class="workflow-step-t">Search the person</span></li>
+                                        <li><span class="workflow-step-n">4</span><span class="workflow-step-t">Menu · Connect · Send without note</span></li>
+                                    </ol>
+                                </div>
+                            </article>
+                        </div>
+                    </div>
+
                     <div class="workflow-group trained-workflows">
                         <div class="section-heading">
                             <div><span class="eyebrow">Trained</span><h3 class="workflow-group-heading">Custom patterns</h3></div>
@@ -268,13 +304,22 @@
                 <div><span class="eyebrow">This device</span><h2>Calibrate touch points</h2></div>
                 <button id="close-calibrate" class="icon-button" type="button">Close</button>
             </div>
-            <p>Pick a target, then click where it belongs on the live screen. Untouched targets use the <strong id="cal-profile">…</strong> profile.</p>
+            <p>Pick a target, then click where it belongs on the live screen. Untouched targets use the <strong id="cal-profile">…</strong> profile. LinkedIn lists taps per workflow — Cold connect (with note) or Connection request (no note).</p>
             <div class="cal-toolbar">
                 <label for="cal-app">App</label>
                 <select id="cal-app">
                     <option value="tiktok">TikTok</option>
                     <option value="instagram">Instagram</option>
+                    <option value="linkedin">LinkedIn</option>
                 </select>
+                <span id="cal-workflow-wrap" hidden>
+                    <label for="cal-workflow">Workflow</label>
+                    <select id="cal-workflow">
+                        <option value="cold-connect">Cold connect</option>
+                        <option value="connect">Connection request</option>
+                        <option value="all">All chrome</option>
+                    </select>
+                </span>
                 <label class="cal-switch"><input id="cal-control" type="checkbox"><span class="cal-switch-track" aria-hidden="true"></span><span>Control device</span></label>
                 <button id="cal-unlock" class="button secondary" type="button"><span aria-hidden="true">🔓</span> Unlock</button>
             </div>
@@ -603,6 +648,56 @@
                 <span class="spacer"></span>
                 <button id="cancel-instagram-cold-dms" class="button secondary" type="button">Cancel</button>
                 <button class="button primary" type="submit">Start cold DMs</button>
+            </div>
+        </form>
+    </dialog>
+    <dialog id="linkedin-connect-dialog">
+        <form id="linkedin-connect-form" class="modal" hx-post="/api/devices/__DEVICE_UDID__/linkedin/fragments/connect-run"
+            hx-target="#device-activity" hx-swap="outerHTML" hx-disabled-elt="button[type=submit]">
+            <div class="modal-head">
+                <div><span class="eyebrow">LinkedIn</span><h2>Connection request</h2></div>
+                <button id="close-linkedin-connect" class="icon-button" type="button">Close</button>
+            </div>
+            <p>Search → People → profile → ⋯ → Connect → <strong>Send without note</strong>. Never opens the note composer.</p>
+            <label for="linkedin-connect-lead-csv">Lead CSV <small>(data/linkedin/leads)</small></label>
+            <select id="linkedin-connect-lead-csv" name="lead_csv" required>
+                <option value="">No lead lists found</option>
+            </select>
+            <label for="linkedin-connect-lead-limit">Connects this run</label>
+            <input id="linkedin-connect-lead-limit" name="lead_limit" type="number" min="1" max="10" value="5" required>
+            <p class="hint">Calibrate <strong>Click profile menu</strong>, <strong>Connect</strong>, and <strong>Send without note</strong> under Touch points → LinkedIn → Connection request.</p>
+            <div class="form-actions">
+                <button id="linkedin-connect-calibrate" class="button secondary" type="button">Touch points</button>
+                <span id="linkedin-connect-result" class="run-meta" aria-live="polite"></span>
+                <span class="spacer"></span>
+                <button id="cancel-linkedin-connect" class="button secondary" type="button">Cancel</button>
+                <button class="button primary" type="submit">Start connection requests</button>
+            </div>
+        </form>
+    </dialog>
+    <dialog id="linkedin-cold-connect-dialog">
+        <form id="linkedin-cold-connect-form" class="modal" hx-post="/api/devices/__DEVICE_UDID__/linkedin/fragments/cold-connect-run"
+            hx-target="#device-activity" hx-swap="outerHTML" hx-disabled-elt="button[type=submit]">
+            <div class="modal-head">
+                <div><span class="eyebrow">LinkedIn</span><h2>Cold connect</h2></div>
+                <button id="close-linkedin-cold-connect" class="icon-button" type="button">Close</button>
+            </div>
+            <p>Same search path, then Add note → type <code>{firstName}</code> note → Add note to invitation.</p>
+            <label for="linkedin-cold-connect-lead-csv">Lead CSV <small>(data/linkedin/leads)</small></label>
+            <select id="linkedin-cold-connect-lead-csv" name="lead_csv" required>
+                <option value="">No lead lists found</option>
+            </select>
+            <label for="linkedin-cold-connect-lead-limit">Connects this run</label>
+            <input id="linkedin-cold-connect-lead-limit" name="lead_limit" type="number" min="1" max="10" value="5" required>
+            <label for="linkedin-cold-connect-note">Note <small>(200 character cap · {firstName} is filled in)</small></label>
+            <textarea id="linkedin-cold-connect-note" name="note" rows="4" maxlength="200" required>Hi {firstName}, we are doing some cool things in marketing and want to connect</textarea>
+            <p class="hint">Calibrate <strong>Click profile menu</strong>, <strong>Add note</strong>, and <strong>Add note to invitation</strong> under Touch points → LinkedIn → Cold connect.</p>
+            <div class="form-actions">
+                <button id="linkedin-cold-connect-calibrate" class="button secondary" type="button">Touch points</button>
+                <span id="linkedin-cold-connect-result" class="run-meta" aria-live="polite"></span>
+                <span class="spacer"></span>
+                <button id="cancel-linkedin-cold-connect" class="button secondary" type="button">Cancel</button>
+                <button class="button primary" type="submit">Start cold connect</button>
             </div>
         </form>
     </dialog>

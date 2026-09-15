@@ -19,6 +19,8 @@ export interface RegisteredDevice extends DeviceIdentity {
     coordinates?: Record<string, { x: number; y: number }>;
     /** Instagram single-tap overrides. */
     instagramCoordinates?: Record<string, { x: number; y: number }>;
+    /** LinkedIn single-tap overrides. */
+    linkedinCoordinates?: Record<string, { x: number; y: number }>;
     disabled?: boolean;
     pluginData: Record<string, JsonObject>;
 }

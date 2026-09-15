@@ -31,3 +31,18 @@ test('every calibratable point exists on the profile', () => {
         assert.equal(typeof point.y, 'number', name);
     }
 });
+
+test('every profile ships a LinkedIn map', () => {
+    for (const profile of ['iphone8', 'iphoneX', 'iphone13', 'iphone17pro'] as const) {
+        const linkedin = coordinatesForProfile(profile).linkedin;
+        assert.equal(linkedin.homeTab.x > 0, true, profile);
+        assert.equal(typeof linkedin.connect.x, 'number', profile);
+        assert.equal(typeof linkedin.sendInvitation.y, 'number', profile);
+    }
+});
+
+test('resolveDeviceCoordinates applies LinkedIn overrides', () => {
+    const resolved = resolveDeviceCoordinates('iphone13', { connect: { x: 100, y: 300 } }, 'linkedin');
+    assert.deepEqual(resolved.linkedin.connect, { x: 100, y: 300 });
+    assert.deepEqual(resolved.linkedin.homeTab, coordinatesForProfile('iphone13').linkedin.homeTab);
+});

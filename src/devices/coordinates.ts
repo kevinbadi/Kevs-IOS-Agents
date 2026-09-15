@@ -1,3 +1,14 @@
+import {
+    LINKEDIN_CALIBRATABLE_POINTS, LINKEDIN_POINT_LABELS, linkedinForScreen,
+    type LinkedInCalibratablePoint, type LinkedInCoordinates,
+} from '../linkedin/coordinates.js';
+
+export {
+    LINKEDIN_BUNDLE_ID, LINKEDIN_CALIBRATABLE_POINTS, LINKEDIN_IPHONE13, LINKEDIN_POINT_LABELS,
+    linkedinForScreen, scaleLinkedIn,
+    type LinkedInCalibratablePoint, type LinkedInCoordinates,
+} from '../linkedin/coordinates.js';
+
 export interface Point {
     x: number;
     y: number;
@@ -73,6 +84,7 @@ export interface SocialAppCoordinates {
 }
 
 export type SocialAppName = 'tiktok' | 'instagram';
+export type CalibrateApp = SocialAppName | 'linkedin';
 
 export interface DeviceCoordinates {
     displayName: string;
@@ -87,6 +99,7 @@ export interface DeviceCoordinates {
     };
     tiktok: SocialAppCoordinates;
     instagram: SocialAppCoordinates;
+    linkedin: LinkedInCoordinates;
 }
 
 export const DEFAULT_COORDINATE_PROFILE = 'iphone8';
@@ -266,6 +279,7 @@ export const DEVICE_COORDINATES = {
         },
         tiktok: IPHONE8_TIKTOK,
         instagram: IPHONE8_INSTAGRAM,
+        linkedin: linkedinForScreen({ width: 375, height: 667 }),
     },
     // Seeded from iphone8 by scaling 375×667 → 375×812 (iPhone X / XS).
     // Temporary fleet unit — prefer one shared model long-term. Recalibrate
@@ -300,6 +314,7 @@ export const DEVICE_COORDINATES = {
             dmSend: { x: 350, y: 520 },
             dmBack: { x: 22, y: 51 },
         },
+        linkedin: linkedinForScreen({ width: 375, height: 812 }),
     },
     // Seeded from iphone8 by scaling 375×667 → 390×844. Instagram chrome for
     // cold DMs is further adjusted from the calibrated iphone17pro map
@@ -307,7 +322,7 @@ export const DEVICE_COORDINATES = {
     // relying on automation taps in production.
     iphone13: {
         displayName: 'iPhone 13/14',
-        productTypes: ['iPhone14,5', 'iPhone14,7'],
+        productTypes: ['iPhone14,2', 'iPhone14,5', 'iPhone14,7'],
         screenSize: { width: 390, height: 844 },
         passcodeKeypad: {
             columnX: [107, 199, 286],
@@ -359,6 +374,7 @@ export const DEVICE_COORDINATES = {
             dmSend: { x: 349, y: 502 },
             dmBack: { x: 23, y: 53 },
         },
+        linkedin: linkedinForScreen({ width: 390, height: 844 }),
     },
     // Seeded from iphone8 by scaling 375×667 → 402×874. Recalibrate via the
     // dashboard before relying on automation taps in production.
@@ -429,6 +445,7 @@ export const DEVICE_COORDINATES = {
             dmBack: { x: 24, y: 55 },
             swipe: { x: 130, startY: 721, endY: 197, durationMs: 380 },
         },
+        linkedin: linkedinForScreen({ width: 402, height: 874 }),
     },
 } satisfies Record<string, DeviceCoordinates>;
 
@@ -518,21 +535,49 @@ export const INSTAGRAM_POINT_LABELS: Record<CalibratablePoint, string> = {
 /** @deprecated Prefer TIKTOK_POINT_LABELS or labelsForApp() */
 export const POINT_LABELS = TIKTOK_POINT_LABELS;
 
-export function labelsForApp(app: SocialAppName): Record<CalibratablePoint, string> {
+export function calibratablePointsForApp(app: CalibrateApp): readonly string[] {
+    return app === 'linkedin' ? LINKEDIN_CALIBRATABLE_POINTS : CALIBRATABLE_POINTS;
+}
+
+export function labelsForApp(app: CalibrateApp): Record<string, string> {
+    if (app === 'linkedin') return LINKEDIN_POINT_LABELS;
     return app === 'instagram' ? INSTAGRAM_POINT_LABELS : TIKTOK_POINT_LABELS;
 }
 
+export function coordinateOverridesForDevice(
+    device: {
+        coordinates?: DeviceCoordinateOverrides;
+        instagramCoordinates?: DeviceCoordinateOverrides;
+        linkedinCoordinates?: DeviceCoordinateOverrides;
+    },
+    app: CalibrateApp,
+): DeviceCoordinateOverrides | undefined {
+    if (app === 'instagram') return device.instagramCoordinates;
+    if (app === 'linkedin') return device.linkedinCoordinates;
+    return device.coordinates;
+}
+
 /** Per-device overrides for the calibratable points, stored on the devices.json entry. */
-export type DeviceCoordinateOverrides = Partial<Record<CalibratablePoint, Point>>;
+export type DeviceCoordinateOverrides = Partial<Record<CalibratablePoint | LinkedInCalibratablePoint, Point>>;
 
 /** The profile's coordinates with any per-device single-tap overrides applied. */
 export function resolveDeviceCoordinates(
     profile: string | undefined,
     overrides: DeviceCoordinateOverrides | undefined,
-    app: SocialAppName = 'tiktok',
+    app: CalibrateApp = 'tiktok',
 ): DeviceCoordinates {
     const base = coordinatesForProfile(profile);
     if (!overrides) return base;
+    if (app === 'linkedin') {
+        const appCoords = { ...base.linkedin };
+        for (const name of LINKEDIN_CALIBRATABLE_POINTS) {
+            const point = overrides[name];
+            if (point && Number.isFinite(point.x) && Number.isFinite(point.y)) {
+                appCoords[name] = { x: Math.round(point.x), y: Math.round(point.y) };
+            }
+        }
+        return { ...base, linkedin: appCoords };
+    }
     const appCoords = { ...base[app] };
     for (const name of CALIBRATABLE_POINTS) {
         const point = overrides[name];
@@ -547,12 +592,14 @@ export function resolveDeviceCoordinates(
 export function validateCoordinateOverrides(
     value: unknown,
     profile: string | undefined,
+    app: CalibrateApp = 'tiktok',
 ): DeviceCoordinateOverrides {
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('coordinates must be an object');
     const { width, height } = coordinatesForProfile(profile).screenSize;
+    const allowed = app === 'linkedin' ? LINKEDIN_CALIBRATABLE_POINTS : CALIBRATABLE_POINTS;
     const result: DeviceCoordinateOverrides = {};
     for (const [key, point] of Object.entries(value as Record<string, unknown>)) {
-        if (!CALIBRATABLE_POINTS.includes(key as CalibratablePoint)) throw new Error(`Unknown calibratable point "${key}"`);
+        if (!(allowed as readonly string[]).includes(key)) throw new Error(`Unknown calibratable point "${key}"`);
         if (!point || typeof point !== 'object') throw new Error(`${key} must be a {x, y} point`);
         const { x, y } = point as { x: unknown; y: unknown };
         if (typeof x !== 'number' || typeof y !== 'number' || !Number.isFinite(x) || !Number.isFinite(y)) {
@@ -561,12 +608,16 @@ export function validateCoordinateOverrides(
         if (x < 0 || y < 0 || x > width || y > height) {
             throw new Error(`${key} (${x}, ${y}) is outside the ${width}×${height} screen`);
         }
-        result[key as CalibratablePoint] = { x: Math.round(x), y: Math.round(y) };
+        result[key as CalibratablePoint | LinkedInCalibratablePoint] = { x: Math.round(x), y: Math.round(y) };
     }
     return result;
 }
 
-export function parseSocialApp(value: unknown): SocialAppName {
-    if (value === 'instagram') return 'instagram';
+export function parseSocialApp(value: unknown): CalibrateApp {
+    if (value === 'instagram' || value === 'linkedin') return value;
     return 'tiktok';
+}
+
+export function parseCalibrateApp(value: unknown): CalibrateApp {
+    return parseSocialApp(value);
 }

@@ -16,6 +16,8 @@ export interface RegisteredDevice {
     coordinates?: DeviceCoordinateOverrides;
     /** Instagram single-tap overrides (dashboard calibration). */
     instagramCoordinates?: DeviceCoordinateOverrides;
+    /** LinkedIn single-tap overrides (dashboard calibration). */
+    linkedinCoordinates?: DeviceCoordinateOverrides;
     /** When true the farm keeps the entry but stops supervising it — no WDA, no worker, no discovery polling. */
     disabled?: boolean;
     pluginData: Record<string, JsonObject>;
@@ -81,6 +83,14 @@ export async function saveRegisteredDevices(devices: RegisteredDevice[], registr
                 device.coordinateProfile,
             );
             if (Object.keys(device.instagramCoordinates).length === 0) delete device.instagramCoordinates;
+        }
+        if (device.linkedinCoordinates !== undefined) {
+            device.linkedinCoordinates = validateCoordinateOverrides(
+                device.linkedinCoordinates,
+                device.coordinateProfile,
+                'linkedin',
+            );
+            if (Object.keys(device.linkedinCoordinates).length === 0) delete device.linkedinCoordinates;
         }
         if (device.disabled !== true) delete device.disabled;
         if (unique.has(device.udid)) throw new Error(`Device ${device.udid} is already registered`);

@@ -13,7 +13,10 @@ process.env.DEVICES_CONFIG_PATH = configPath;
 const seed = () => writeFile(configPath, JSON.stringify([
     { name: 'Phone', udid: 'u1', coordinateProfile: 'iphone8', pluginData: {} },
 ]));
-const onDisk = async () => JSON.parse(await readFile(configPath, 'utf8')) as Array<{ coordinates?: Record<string, unknown> }>;
+    const onDisk = async () => JSON.parse(await readFile(configPath, 'utf8')) as Array<{
+        coordinates?: Record<string, unknown>;
+        linkedinCoordinates?: Record<string, unknown>;
+    }>;
 
 const scheduler = { async activeExecution() { return null; }, async listSchedules() { return []; } } as unknown as SchedulerRepository;
 
@@ -29,6 +32,36 @@ test('calibrate: GET reports points, PATCH stores and clears overrides', async (
     const like = list.json().points.find((p: { name: string }) => p.name === 'like');
     assert.equal(like.overridden, false);
     assert.deepEqual(like.current, like.default);
+
+    const linkedin = await inject(app, { method: 'GET', url: '/api/devices/u1/coordinates?app=linkedin' });
+    assert.equal(linkedin.statusCode, 200);
+    assert.equal(linkedin.json().app, 'linkedin');
+    assert.equal(linkedin.json().workflow, 'all');
+    const connect = linkedin.json().points.find((p: { name: string }) => p.name === 'connect');
+    assert.ok(connect, 'LinkedIn connect point is listed');
+    assert.match(connect.label, /LinkedIn/);
+    assert.equal(connect.overridden, false);
+
+    const cold = await inject(app, { method: 'GET', url: '/api/devices/u1/coordinates?app=linkedin&workflow=cold-connect' });
+    assert.equal(cold.statusCode, 200);
+    assert.equal(cold.json().workflow, 'cold-connect');
+    assert.deepEqual(cold.json().points.map((p: { name: string }) => p.name), [
+        'homeTab', 'searchField', 'searchPeopleFilter', 'searchFirstResult',
+        'profileMenu', 'connect', 'addANote', 'noteComposer', 'sendInvitation',
+    ]);
+    assert.match(cold.json().points[1].label, /Search bar/);
+
+    const plain = await inject(app, { method: 'GET', url: '/api/devices/u1/coordinates?app=linkedin&workflow=connect' });
+    assert.equal(plain.statusCode, 200);
+    assert.equal(plain.json().workflow, 'connect');
+    assert.deepEqual(plain.json().points.map((p: { name: string }) => p.name), [
+        'homeTab', 'searchField', 'searchPeopleFilter', 'searchFirstResult',
+        'profileMenu', 'connect', 'sendWithoutNote',
+    ]);
+    assert.match(plain.json().points[6].label, /without note/i);
+
+    const badWorkflow = await inject(app, { method: 'GET', url: '/api/devices/u1/coordinates?app=linkedin&workflow=pymk' });
+    assert.equal(badWorkflow.statusCode, 400);
 
     const set = await inject(app, {
         method: 'PATCH', url: '/api/devices/u1',
@@ -47,6 +80,14 @@ test('calibrate: GET reports points, PATCH stores and clears overrides', async (
         payload: { coordinates: { like: { x: 1, y: 9999 } } }, headers: { 'content-type': 'application/json' },
     });
     assert.equal(bad.statusCode, 400);
+
+    const linkedinPatch = await inject(app, {
+        method: 'PATCH', url: '/api/devices/u1',
+        payload: { linkedinCoordinates: { connect: { x: 80, y: 300 } } },
+        headers: { 'content-type': 'application/json' },
+    });
+    assert.equal(linkedinPatch.statusCode, 200);
+    assert.deepEqual((await onDisk())[0]!.linkedinCoordinates, { connect: { x: 80, y: 300 } });
 
     const clear = await inject(app, {
         method: 'PATCH', url: '/api/devices/u1',

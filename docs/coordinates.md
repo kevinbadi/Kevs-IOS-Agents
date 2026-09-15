@@ -3,7 +3,7 @@
 **Short answer to "can people add coordinate configs?":** not at runtime. A
 coordinate profile is a compiled constant in the source. `devices.json` only
 *selects* one that already exists. Adding a new layout means editing two files
-and redeploying. Profiles ship with both `tiktok` and `instagram` tap maps
+and redeploying. Profiles ship with `tiktok`, `instagram`, and `linkedin` tap maps
 (`iphone8`, `iphoneX`, `iphone13`, and `iphone17pro` today).
 
 ## What a profile is
@@ -31,9 +31,13 @@ export const DEVICE_COORDINATES = {
 } satisfies Record<string, DeviceCoordinates>;
 ```
 
-Dashboard calibration can target either app (`GET/PATCH` with `app=tiktok|instagram`).
-TikTok overrides live in `device.coordinates`; Instagram overrides in
-`device.instagramCoordinates`.
+Dashboard calibration can target TikTok, Instagram, or LinkedIn
+(`GET/PATCH` with `app=tiktok|instagram|linkedin`). TikTok overrides live in
+`device.coordinates`; Instagram in `device.instagramCoordinates`; LinkedIn in
+`device.linkedinCoordinates`. See [`docs/linkedin.md`](linkedin.md). LinkedIn
+Touch points are **per workflow** (`?workflow=cold-connect` is with-note,
+`?workflow=connect` is Send without note). Pass `workflow=all` for the full
+chrome map.
 
 ## How selection works
 
@@ -57,6 +61,7 @@ TikTok overrides live in `device.coordinates`; Instagram overrides in
      passcodeKeypad: { columnX: [/* … */], rowY: [/* … */] },
      tiktok: { /* every field, re-measured for this screen */ },
      instagram: { /* every field, re-measured for this screen */ },
+     linkedin: { /* scaled from src/linkedin/coordinates.ts or re-measured */ },
    },
    ```
 
@@ -78,15 +83,16 @@ firing single taps with `POST /api/devices/:udid/remote/action`
 
 ## Per‑device overrides (dashboard calibration)
 
-The **15 single‑tap calibratable targets** (same set for TikTok and Instagram)
-— `profileTab`, `homeTab`, `accountSwitcher`, `create`, `upload`,
-`selectMultiple`, `useLayout`, `pickerNext`, `editorNext`, `caption`,
-`keyboardBack`, `draft`, `finish`, `like`, `save` — can be re‑pointed per
-device without a code change, from the device page → **Touch points**: choose
-**TikTok** or **Instagram**, pick a target, click where it belongs on the live
-screen, Save. Reset one point or all of them back to the profile. Flip
-**Control device** to drive the phone with taps/swipes on the preview so you
-can get to the screen a target lives on, and the padlock button unlocks it.
+The **single-tap calibratable targets** for TikTok and Instagram share one
+shape (tabs, create, picker Next, like/save/comment, DMs). LinkedIn has its
+own set — Home / My Network / Post / Notifications / Jobs, Search,
+Connect / Add a note / Send, People You May Know, Messaging — listed in
+`LINKEDIN_CALIBRATABLE_POINTS`. Re-point any of them from the device page →
+**Touch points**: choose **TikTok**, **Instagram**, or **LinkedIn**, pick a
+target, click where it belongs on the live screen, Save. Reset one point or
+all of them back to the profile. Flip **Control device** to drive the phone
+with taps/swipes on the preview so you can get to the screen a target lives
+on, and the padlock button unlocks it.
 
 Overrides merge over the selected profile at runtime
 (`resolveDeviceCoordinates`):
@@ -94,14 +100,16 @@ Overrides merge over the selected profile at runtime
 ```jsonc
 { "name": "Phone 12", "coordinateProfile": "iphone8",
   "coordinates": { "like": { "x": 350, "y": 320 }, "create": { "x": 190, "y": 642 } },
-  "instagramCoordinates": { "like": { "x": 348, "y": 410 } } }
+  "instagramCoordinates": { "like": { "x": 348, "y": 410 } },
+  "linkedinCoordinates": { "connect": { "x": 88, "y": 318 } } }
 ```
 
-API: `GET /api/devices/:udid/coordinates?app=tiktok|instagram` (effective
+API: `GET /api/devices/:udid/coordinates?app=tiktok|instagram|linkedin` (effective
 values + which are overridden), `PATCH /api/devices/:udid` with
-`{ "coordinates": { … } }` and/or `{ "instagramCoordinates": { … } }` — each
-object **replaces** that app's override map; `{}` clears it. Points are
-validated against the profile's screen bounds.
+`{ "coordinates": { … } }`, `{ "instagramCoordinates": { … } }`, and/or
+`{ "linkedinCoordinates": { … } }` — each object **merges** into that app's
+override map; `{}` clears it. Points are validated against the profile's
+screen bounds.
 
 The `picker` grid, `swipe` vector and `passcodeKeypad` are not single points and
 stay profile‑level — add a new profile for a materially different layout.
