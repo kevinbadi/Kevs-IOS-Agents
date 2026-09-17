@@ -52,8 +52,18 @@ export interface AgentRun {
     summary: string | null;
     error: string | null;
     notes: string[];
+    /** Timestamped, human-readable lines — the same kind of relay the static workflows stream. */
+    log: string[];
     usage: VlmUsage;
     estimatedCostUsd: number;
+}
+
+const LOG_LINE_LIMIT = 600;
+
+function appendLog(run: AgentRun, message: string): void {
+    const stamp = new Date().toLocaleTimeString('en-GB', { hour12: false });
+    run.log.push(`${stamp}  ${message}`);
+    if (run.log.length > LOG_LINE_LIMIT) run.log.splice(0, run.log.length - LOG_LINE_LIMIT);
 }
 
 export interface AgentRunnerOptions {
@@ -89,6 +99,25 @@ function estimateCost(model: string, usage: VlmUsage): number {
     const key = Object.keys(PRICING).find((name) => model.startsWith(name));
     const price = key ? PRICING[key]! : PRICING['claude-haiku-4-5']!;
     return (usage.inputTokens * price.input + usage.outputTokens * price.output) / 1_000_000;
+}
+
+/** Runs saved before the log existed: rebuild a relay from their recorded steps. */
+function reconstructLog(run: AgentRun): string[] {
+    const stamp = (iso: string) => new Date(iso).toLocaleTimeString('en-GB', { hour12: false });
+    const lines = [`${stamp(run.createdAt)}  Agent run started on ${run.deviceName}`, `${stamp(run.createdAt)}  Goal: ${run.goal}`];
+    for (const step of run.steps) {
+        const stepNo = `Step ${step.index + 1}/${run.maxSteps}`;
+        const at = stamp(step.startedAt);
+        lines.push(`${at}  ${stepNo} · On ${step.app ?? 'unknown screen'} · ${step.elementCount} elements${step.locked ? ' · locked' : ''}`);
+        if (step.reasoning) lines.push(`${at}  ${stepNo} · Reason — ${step.reasoning}`);
+        lines.push(`${at}  ${stepNo} · Act — ${step.actionLabel}`);
+        if (step.result === 'error') lines.push(`${at}  ${stepNo} · Action failed ✕ ${step.error ?? ''}`);
+    }
+    const end = stamp(run.finishedAt ?? run.createdAt);
+    if (run.summary) lines.push(`${end}  ✓ Goal reached — ${run.summary}`);
+    else if (run.error) lines.push(`${end}  ✕ ${run.error}`);
+    lines.push(`${end}  Finished · ${run.status} · ${run.steps.length} step${run.steps.length === 1 ? '' : 's'}`);
+    return lines;
 }
 
 function publicRun(run: AgentRun): AgentRun {
@@ -134,6 +163,7 @@ export class AgentRunner {
                     if (!RUN_ID.test(entry) || this.runs.has(entry)) continue;
                     try {
                         const run = JSON.parse(await readFile(path.join(this.dataDir, entry, 'run.json'), 'utf8')) as AgentRun;
+                        run.log ??= reconstructLog(run);
                         if (run.status === 'running') {
                             run.status = 'stopped';
                             run.error = 'The dashboard restarted while this run was in progress.';
@@ -155,7 +185,7 @@ export class AgentRunner {
             .filter((run) => !deviceUdid || run.deviceUdid === deviceUdid)
             .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
             .slice(0, limit)
-            .map((run) => ({ ...publicRun(run), steps: run.steps.map((step) => ({ ...step, reasoning: step.reasoning.slice(0, 160) })) }));
+            .map((run) => ({ ...publicRun(run), log: [], steps: run.steps.map((step) => ({ ...step, reasoning: step.reasoning.slice(0, 160) })) }));
     }
 
     async get(id: string): Promise<AgentRun | null> {
@@ -204,9 +234,13 @@ export class AgentRunner {
             summary: null,
             error: null,
             notes: [],
+            log: [],
             usage: { inputTokens: 0, outputTokens: 0 },
             estimatedCostUsd: 0,
         };
+        appendLog(run, `Agent run started on ${run.deviceName}`);
+        appendLog(run, `Goal: ${goal}`);
+        appendLog(run, `Model ${run.model} · up to ${maxSteps} steps`);
         this.runs.set(run.id, run);
         this.active.set(run.deviceUdid, run.id);
         await mkdir(path.join(this.dataDir, run.id), { recursive: true });
@@ -229,25 +263,34 @@ export class AgentRunner {
         let lastActionLabel: string | null = null;
         let unchangedRepeats = 0;
         try {
+            appendLog(run, 'Checking that the phone is unlocked');
             const unlock = await device.ensureUnlocked();
-            if (unlock.note) run.notes.push(unlock.note);
+            if (unlock.note) {
+                run.notes.push(unlock.note);
+                appendLog(run, unlock.note);
+            }
 
             for (let index = 0; index < run.maxSteps; index += 1) {
                 if (this.stopRequested.has(run.id)) {
                     run.status = 'stopped';
                     run.error = 'Stopped by operator.';
+                    appendLog(run, 'Stopped by operator');
                     break;
                 }
                 const startedAt = Date.now();
+                const stepNo = `Step ${index + 1}/${run.maxSteps}`;
+                appendLog(run, `${stepNo} · Observe — screenshot + accessibility tree`);
                 const observation = await device.observe();
                 const screenshot = `step-${String(index + 1).padStart(2, '0')}.jpg`;
                 await writeFile(path.join(this.dataDir, run.id, screenshot), observation.image);
+                appendLog(run, `${stepNo} · On ${observation.app ?? 'unknown screen'} · ${observation.hierarchy.total} elements${observation.locked ? ' · locked' : ''}`);
 
                 const unchanged = lastFingerprint !== null && observation.fingerprint === lastFingerprint;
                 unchangedRepeats = unchanged ? unchangedRepeats + 1 : 0;
                 const nudge = unchangedRepeats >= 2 && lastActionLabel
                     ? `The screen has not changed after your last ${unchangedRepeats} actions (last: ${lastActionLabel}). Do something different.`
                     : undefined;
+                if (nudge) appendLog(run, `${stepNo} · Screen unchanged ${unchangedRepeats}× — nudging the model to try something else`);
 
                 const step: AgentStep = {
                     index,
@@ -293,12 +336,15 @@ export class AgentRunner {
                 run.usage.inputTokens += decision.usage.inputTokens;
                 run.usage.outputTokens += decision.usage.outputTokens;
                 run.estimatedCostUsd = estimateCost(run.model, run.usage);
+                if (decision.reasoning) appendLog(run, `${stepNo} · Reason — ${decision.reasoning}`);
+                appendLog(run, `${stepNo} · Act — ${step.actionLabel}`);
 
                 if (decision.action.type === 'done') {
                     step.result = 'ok';
                     step.durationMs = Date.now() - startedAt;
                     run.status = 'succeeded';
                     run.summary = decision.action.summary;
+                    appendLog(run, `✓ Goal reached — ${run.summary}`);
                     await this.persist(run);
                     break;
                 }
@@ -307,6 +353,7 @@ export class AgentRunner {
                     step.durationMs = Date.now() - startedAt;
                     run.status = 'failed';
                     run.error = decision.action.reason;
+                    appendLog(run, `✕ Model gave up — ${run.error}`);
                     await this.persist(run);
                     break;
                 }
@@ -316,15 +363,18 @@ export class AgentRunner {
                     step.durationMs = Date.now() - startedAt;
                     run.status = 'stopped';
                     run.error = 'Stopped by operator.';
+                    appendLog(run, 'Stopped by operator — action not executed');
                     await this.persist(run);
                     break;
                 }
                 try {
                     await device.perform(decision.action);
                     step.result = 'ok';
+                    appendLog(run, `${stepNo} · Executed ✓`);
                 } catch (error) {
                     step.result = 'error';
                     step.error = error instanceof Error ? error.message : String(error);
+                    appendLog(run, `${stepNo} · Action failed ✕ ${step.error}`);
                 }
                 step.durationMs = Date.now() - startedAt;
                 lastFingerprint = observation.fingerprint;
@@ -335,6 +385,7 @@ export class AgentRunner {
             if (run.status === 'running') {
                 run.status = 'failed';
                 run.error = `Reached the ${run.maxSteps}-step limit without finishing.`;
+                appendLog(run, `✕ ${run.error}`);
             }
         } catch (error) {
             run.status = this.stopRequested.has(run.id) ? 'stopped' : 'failed';
@@ -342,6 +393,7 @@ export class AgentRunner {
             if (/WebDriverAgent is unavailable/i.test(run.error)) {
                 run.error += ' — WDA is not running for this phone. Unlock it (or store its passcode) and check the device page; WDA starts automatically once the phone is unlocked.';
             }
+            appendLog(run, `✕ ${run.status === 'stopped' ? 'Stopped' : 'Run failed'} — ${run.error}`);
             const pending = run.steps.at(-1);
             if (pending && pending.result === 'pending') {
                 pending.result = 'error';
@@ -350,6 +402,7 @@ export class AgentRunner {
             }
         } finally {
             run.finishedAt = new Date().toISOString();
+            appendLog(run, `Finished · ${run.status} · ${run.steps.length} step${run.steps.length === 1 ? '' : 's'} · ${run.usage.inputTokens + run.usage.outputTokens} tokens · ~$${run.estimatedCostUsd.toFixed(4)}`);
             this.active.delete(run.deviceUdid);
             this.stopRequested.delete(run.id);
             await device.release();

@@ -254,6 +254,18 @@ test('AgentRunner runs observe → reason → act until the model says done', as
     assert.equal(finished.usage.inputTokens, 4000);
     assert.ok(finished.estimatedCostUsd > 0);
 
+    // The run relays a readable log like the static workflows do.
+    const relay = finished.log.map((line) => line.replace(/^\d\d:\d\d:\d\d\s+/, ''));
+    assert.equal(relay[0], 'Agent run started on Farm #1');
+    assert.ok(relay.includes('Step 1/10 · Observe — screenshot + accessibility tree'));
+    assert.ok(relay.includes('Step 1/10 · Reason — Instagram is not open yet.'));
+    assert.ok(relay.includes('Step 1/10 · Act — open com.burbn.instagram'));
+    assert.ok(relay.includes('Step 1/10 · Executed ✓'));
+    assert.ok(relay.includes('✓ Goal reached — Story posted.'));
+    assert.match(relay.at(-1) ?? '', /^Finished · succeeded · 4 steps/);
+    // History listings stay light: the full log only comes with the single-run endpoint.
+    assert.deepEqual((await runner.list())[0]?.log, []);
+
     // The model saw the goal, compact hierarchy, and running history.
     assert.equal(model.requests[0]?.goal, 'Post a story on Instagram');
     assert.match(model.requests[0]?.hierarchy ?? '', /Button "Create & share" @\(195,805\)/);

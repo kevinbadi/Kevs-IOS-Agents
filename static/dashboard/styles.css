@@ -2468,6 +2468,19 @@ dialog#calibrate-dialog { width: min(760px, calc(100% - 28px)); }
 .agent-outcome.stopped { background: rgb(255 255 255 / 3%); }
 
 .agent-timeline-heading { margin: 22px 0 12px; }
+.agent-log-panel { margin-bottom: 24px; }
+.agent-log-panel pre { min-height: 140px; max-height: 340px; }
+.agent-log-follow {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--muted);
+    font-size: 12px;
+    cursor: pointer;
+}
+.agent-log-follow input { accent-color: var(--accent, #7c5cff); }
+.agent-timeline-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; }
+
 .agent-timeline { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
 .agent-timeline-empty { color: var(--muted); font-size: 13px; }
 .agent-step {

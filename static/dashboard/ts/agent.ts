@@ -43,6 +43,7 @@ interface AgentRun {
     summary: string | null;
     error: string | null;
     notes: string[];
+    log?: string[];
     usage: { inputTokens: number; outputTokens: number };
     estimatedCostUsd: number;
 }
@@ -89,6 +90,8 @@ const statElapsed = $<HTMLElement>('#agent-stat-elapsed');
 const outcome = $<HTMLElement>('#agent-outcome');
 const timeline = $<HTMLOListElement>('#agent-timeline');
 const livePanel = $<HTMLElement>('#agent-live');
+const logEl = $<HTMLPreElement>('#agent-log');
+const logFollow = $<HTMLInputElement>('#agent-log-follow');
 
 let currentRunId: string | null = new URLSearchParams(location.search).get('run');
 let pollTimer: number | null = null;
@@ -272,6 +275,16 @@ function renderTimeline(run: AgentRun): void {
     }).join('');
 }
 
+function renderLog(run: AgentRun): void {
+    const lines = run.log ?? [];
+    const text = lines.length
+        ? lines.join('\n')
+        : (run.status === 'running' ? 'Waiting for the first log line…' : 'No log was recorded for this run.');
+    if (logEl.textContent === text) return;
+    logEl.textContent = text;
+    if (logFollow.checked) logEl.scrollTop = logEl.scrollHeight;
+}
+
 function renderRun(run: AgentRun): void {
     currentRun = run;
     livePanel.dataset.status = run.status;
@@ -291,6 +304,7 @@ function renderRun(run: AgentRun): void {
     updateElapsed();
 
     renderStage(run);
+    renderLog(run);
     renderTimeline(run);
 
     if (run.status === 'running') {

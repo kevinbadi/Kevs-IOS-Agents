@@ -33,6 +33,8 @@ const statElapsed = $('#agent-stat-elapsed');
 const outcome = $('#agent-outcome');
 const timeline = $('#agent-timeline');
 const livePanel = $('#agent-live');
+const logEl = $('#agent-log');
+const logFollow = $('#agent-log-follow');
 let currentRunId = new URLSearchParams(location.search).get('run');
 let pollTimer = null;
 let elapsedTimer = null;
@@ -212,6 +214,17 @@ function renderTimeline(run) {
         </li>`;
     }).join('');
 }
+function renderLog(run) {
+    const lines = run.log ?? [];
+    const text = lines.length
+        ? lines.join('\n')
+        : (run.status === 'running' ? 'Waiting for the first log line…' : 'No log was recorded for this run.');
+    if (logEl.textContent === text)
+        return;
+    logEl.textContent = text;
+    if (logFollow.checked)
+        logEl.scrollTop = logEl.scrollHeight;
+}
 function renderRun(run) {
     currentRun = run;
     livePanel.dataset.status = run.status;
@@ -229,6 +242,7 @@ function renderRun(run) {
     statCost.textContent = formatCost(run.estimatedCostUsd);
     updateElapsed();
     renderStage(run);
+    renderLog(run);
     renderTimeline(run);
     if (run.status === 'running') {
         outcome.hidden = true;
