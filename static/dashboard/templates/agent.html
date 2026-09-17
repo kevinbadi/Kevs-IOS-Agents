@@ -121,9 +121,14 @@
                             <img id="agent-screen-img" alt="" hidden>
                             <div id="agent-screen-empty" class="agent-screen-empty">
                                 <div class="device-icon" aria-hidden="true"></div>
-                                <p>The phone's screen appears here as the agent works.</p>
+                                <p id="agent-screen-empty-text">Connecting to the phone's screen…</p>
                             </div>
                             <div id="agent-tap-marker" class="agent-tap-marker" hidden></div>
+                            <span id="agent-live-badge" class="agent-live-badge" hidden><span class="agent-live-badge-dot" aria-hidden="true"></span>Live</span>
+                        </div>
+                        <div class="agent-screen-modes" role="group" aria-label="Screen view">
+                            <button id="agent-mode-live" type="button" class="agent-screen-mode is-active" data-mode="live">Live</button>
+                            <button id="agent-mode-capture" type="button" class="agent-screen-mode" data-mode="capture">Step capture</button>
                         </div>
                         <figcaption id="agent-screen-caption" class="agent-screen-caption"></figcaption>
                     </figure>

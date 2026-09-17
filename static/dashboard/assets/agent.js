@@ -22,8 +22,12 @@ const liveNotes = $('#agent-live-notes');
 const stopButton = $('#agent-stop');
 const screenImg = $('#agent-screen-img');
 const screenEmpty = $('#agent-screen-empty');
+const screenEmptyText = $('#agent-screen-empty-text');
 const screenCaption = $('#agent-screen-caption');
 const tapMarker = $('#agent-tap-marker');
+const liveBadge = $('#agent-live-badge');
+const modeLiveButton = $('#agent-mode-live');
+const modeCaptureButton = $('#agent-mode-capture');
 const thoughtText = $('#agent-thought-text');
 const thoughtAction = $('#agent-thought-action');
 const statSteps = $('#agent-stat-steps');
@@ -40,6 +44,109 @@ let pollTimer = null;
 let elapsedTimer = null;
 let currentRun = null;
 let configured = false;
+let devices = [];
+let screenMode = 'live';
+let liveUdid = null;
+let liveRetryTimer = null;
+let pinnedCapture = null;
+function streamUrl(udid) {
+    return `/api/devices/${encodeURIComponent(udid)}/remote/stream?t=${Date.now()}`;
+}
+/** Which phone the live view should follow: the selected run's phone, else the form's. */
+function liveTargetUdid() {
+    if (currentRun)
+        return currentRun.deviceUdid;
+    return deviceSelect.value || null;
+}
+function deviceLabel(udid) {
+    return devices.find((device) => device.udid === udid)?.name ?? currentRun?.deviceName ?? udid;
+}
+function stopLiveStream() {
+    if (liveRetryTimer !== null)
+        window.clearTimeout(liveRetryTimer);
+    liveRetryTimer = null;
+    liveUdid = null;
+    liveBadge.hidden = true;
+    if (screenImg.dataset.kind === 'live') {
+        screenImg.removeAttribute('src');
+        delete screenImg.dataset.kind;
+        delete screenImg.dataset.src;
+    }
+}
+function showLiveStream(force = false) {
+    const udid = liveTargetUdid();
+    if (!udid) {
+        stopLiveStream();
+        screenImg.hidden = true;
+        screenEmpty.hidden = false;
+        screenEmptyText.textContent = 'Pick a phone to see its screen here.';
+        return;
+    }
+    if (!force && liveUdid === udid && screenImg.dataset.kind === 'live' && screenImg.getAttribute('src'))
+        return;
+    if (liveRetryTimer !== null)
+        window.clearTimeout(liveRetryTimer);
+    liveRetryTimer = null;
+    liveUdid = udid;
+    screenImg.dataset.kind = 'live';
+    delete screenImg.dataset.src;
+    screenImg.alt = `Live screen of ${deviceLabel(udid)}`;
+    screenImg.hidden = true;
+    screenEmpty.hidden = false;
+    screenEmptyText.textContent = `Connecting to ${deviceLabel(udid)}…`;
+    liveBadge.hidden = true;
+    screenImg.src = streamUrl(udid);
+}
+function showCapture(run, step) {
+    const url = screenshotUrl(run, step);
+    stopLiveStream();
+    if (!url) {
+        screenImg.hidden = true;
+        screenEmpty.hidden = false;
+        screenEmptyText.textContent = 'No capture for this step.';
+        return;
+    }
+    if (screenImg.dataset.src !== url || screenImg.dataset.kind !== 'capture') {
+        screenImg.dataset.kind = 'capture';
+        screenImg.dataset.src = url;
+        screenImg.src = url;
+    }
+    screenImg.alt = `Step ${step.index + 1} screenshot`;
+    screenImg.hidden = false;
+    screenEmpty.hidden = true;
+}
+function setScreenMode(mode) {
+    screenMode = mode;
+    if (mode === 'live')
+        pinnedCapture = null;
+    modeLiveButton.classList.toggle('is-active', mode === 'live');
+    modeCaptureButton.classList.toggle('is-active', mode === 'capture');
+    if (currentRun)
+        renderStage(currentRun);
+    else if (mode === 'live')
+        showLiveStream();
+    else {
+        stopLiveStream();
+        screenImg.hidden = true;
+        screenEmpty.hidden = false;
+        screenEmptyText.textContent = 'Step captures appear here once a run has taken a step.';
+    }
+}
+screenImg.addEventListener('load', () => {
+    screenImg.hidden = false;
+    screenEmpty.hidden = true;
+    liveBadge.hidden = screenImg.dataset.kind !== 'live';
+});
+screenImg.addEventListener('error', () => {
+    if (screenImg.dataset.kind !== 'live')
+        return;
+    screenImg.removeAttribute('src');
+    screenImg.hidden = true;
+    screenEmpty.hidden = false;
+    liveBadge.hidden = true;
+    screenEmptyText.textContent = `${liveUdid ? deviceLabel(liveUdid) : 'The phone'} isn't streaming right now — is it unlocked and connected? Retrying…`;
+    liveRetryTimer = window.setTimeout(() => showLiveStream(true), 5_000);
+});
 function escapeHtml(value) {
     return String(value ?? '').replace(/[&<>"']/g, (character) => ({
         '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -118,7 +225,7 @@ async function loadStatus() {
 }
 async function loadDevices() {
     try {
-        const devices = await api('/api/devices');
+        devices = await api('/api/devices');
         const usable = devices.filter((device) => !device.disabled);
         const previous = deviceSelect.value;
         deviceSelect.innerHTML = usable.length
@@ -126,6 +233,8 @@ async function loadDevices() {
             : '<option value="">No registered phones</option>';
         const firstOnline = usable.find((device) => device.connected);
         deviceSelect.value = previous && usable.some((device) => device.udid === previous) ? previous : firstOnline?.udid ?? '';
+        if (screenMode === 'live' && !currentRun)
+            showLiveStream();
     }
     catch {
         deviceSelect.innerHTML = '<option value="">Could not load phones</option>';
@@ -171,25 +280,32 @@ function positionMarker(step) {
 }
 function renderStage(run) {
     const latest = run.steps.at(-1);
-    if (!latest) {
+    const shown = screenMode === 'capture' ? (pinnedCapture ?? latest) : latest;
+    if (screenMode === 'live') {
+        showLiveStream();
+        const stepInfo = latest ? `step ${latest.index + 1}${latest.locked ? ' · locked' : ''}` : (run.status === 'running' ? 'taking the first screenshot…' : 'idle');
+        screenCaption.textContent = `Live · ${run.deviceName} · ${stepInfo}`;
+    }
+    else if (shown) {
+        showCapture(run, shown);
+        screenCaption.textContent = `Step ${shown.index + 1} · ${shown.screen.width}×${shown.screen.height} pt · ${shown.elementCount} elements${shown.locked ? ' · locked' : ''}`;
+    }
+    else {
+        stopLiveStream();
         screenImg.hidden = true;
         screenEmpty.hidden = false;
+        screenEmptyText.textContent = run.status === 'running' ? 'Taking the first screenshot…' : 'No steps were recorded.';
+        screenCaption.textContent = '';
+    }
+    if (!latest) {
         tapMarker.hidden = true;
-        screenCaption.textContent = run.status === 'running' ? 'Taking the first screenshot…' : '';
         thoughtText.textContent = run.status === 'running' ? 'Waking the phone and taking the first screenshot…' : (run.error ?? 'No steps were recorded.');
         thoughtAction.hidden = true;
         return;
     }
-    const url = screenshotUrl(run, latest);
-    if (url && screenImg.dataset.src !== url) {
-        screenImg.dataset.src = url;
-        screenImg.src = url;
-    }
-    screenImg.hidden = !url;
-    screenEmpty.hidden = Boolean(url);
-    screenImg.alt = `Step ${latest.index + 1} screenshot`;
-    screenCaption.textContent = `Step ${latest.index + 1} · ${latest.screen.width}×${latest.screen.height} pt · ${latest.elementCount} elements${latest.locked ? ' · locked' : ''}`;
-    positionMarker(latest);
+    // In live mode the marker shows where the most recent action landed; when a
+    // capture is pinned it shows that step's action.
+    positionMarker(screenMode === 'capture' && pinnedCapture ? pinnedCapture : latest);
     thoughtText.textContent = latest.reasoning || (latest.result === 'pending' ? 'Looking at the screen and deciding what to do…' : latest.actionLabel);
     thoughtAction.hidden = latest.result === 'pending';
     thoughtAction.className = `agent-action-chip ${latest.result}`;
@@ -292,6 +408,7 @@ function selectRun(id) {
     stopPolling();
     currentRunId = id;
     currentRun = null;
+    pinnedCapture = null;
     const url = new URL(location.href);
     url.searchParams.set('run', id);
     history.replaceState(null, '', url);
@@ -360,10 +477,11 @@ timeline.addEventListener('click', (event) => {
     const url = step ? screenshotUrl(currentRun, step) : null;
     if (!step || !url)
         return;
-    screenImg.dataset.src = url;
-    screenImg.src = url;
-    screenImg.hidden = false;
-    screenEmpty.hidden = true;
+    pinnedCapture = step;
+    screenMode = 'capture';
+    modeLiveButton.classList.remove('is-active');
+    modeCaptureButton.classList.add('is-active');
+    showCapture(currentRun, step);
     screenCaption.textContent = `Step ${step.index + 1} · ${step.actionLabel}`;
     positionMarker(step);
     thoughtText.textContent = step.reasoning || step.actionLabel;
@@ -373,6 +491,12 @@ timeline.addEventListener('click', (event) => {
     livePanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
 });
 refreshButton.addEventListener('click', () => { void loadHistory(); void loadDevices(); });
+modeLiveButton.addEventListener('click', () => setScreenMode('live'));
+modeCaptureButton.addEventListener('click', () => setScreenMode('capture'));
+deviceSelect.addEventListener('change', () => {
+    if (screenMode === 'live' && !currentRun)
+        showLiveStream();
+});
 for (const example of document.querySelectorAll('.agent-example[data-goal]')) {
     example.addEventListener('click', () => {
         goalInput.value = example.dataset.goal ?? '';
@@ -382,8 +506,16 @@ for (const example of document.querySelectorAll('.agent-example[data-goal]')) {
 elapsedTimer = window.setInterval(updateElapsed, 1_000);
 window.addEventListener('beforeunload', () => {
     stopPolling();
+    stopLiveStream();
     if (elapsedTimer !== null)
         window.clearInterval(elapsedTimer);
+});
+// Don't hold an MJPEG connection open for a hidden tab.
+document.addEventListener('visibilitychange', () => {
+    if (document.hidden)
+        stopLiveStream();
+    else if (screenMode === 'live')
+        showLiveStream(true);
 });
 void loadStatus();
 void loadDevices();
