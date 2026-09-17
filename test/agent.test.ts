@@ -6,11 +6,12 @@ import test from 'node:test';
 
 import sharp from 'sharp';
 
-import { describeAction, normalizeCoordinates, parseAgentAction } from '../src/agent/actions.js';
-import { annotateScreenshot, describeForegroundApp, type AgentRemote } from '../src/agent/device.js';
+import { describeAction, normalizeCoordinates, parseAgentAction, toolCallForAction } from '../src/agent/actions.js';
+import { AgentDevice, annotateScreenshot, describeForegroundApp, scrollGesture, type AgentRemote } from '../src/agent/device.js';
+import { appHintsFor, bundleIdFromLabel } from '../src/agent/playbook.js';
 import { compactHierarchy } from '../src/agent/hierarchy.js';
-import { AgentRunner } from '../src/agent/runner.js';
-import { AnthropicVisionModel, buildMessages, type VisionModel, type VlmDecision, type VlmStepRequest } from '../src/agent/vlm.js';
+import { AgentRunner, repeatedTapGuard, type AgentStep } from '../src/agent/runner.js';
+import { AnthropicVisionModel, actionTally, buildMessages, type PriorTurn, type VisionModel, type VlmDecision, type VlmStepRequest } from '../src/agent/vlm.js';
 import { OllamaVisionModel, buildLocalMessages, decisionFromJson, extractJsonObject } from '../src/agent/local-vlm.js';
 import { createApp } from '../src/api/app.js';
 import { defaultDashboardTheme } from '../src/dashboard-theme.js';
@@ -66,6 +67,10 @@ test('parseAgentAction validates and normalises tool calls', () => {
     });
     assert.deepEqual(parseAgentAction('long_press', { x: 1, y: 2, duration_ms: 99_999 }), { type: 'long_press', x: 1, y: 2, durationMs: 5_000 });
     assert.deepEqual(parseAgentAction('wait', { seconds: 60 }), { type: 'wait', seconds: 10 });
+    assert.deepEqual(parseAgentAction('scroll', { direction: ' Down ' }), { type: 'scroll', direction: 'down' });
+    assert.throws(() => parseAgentAction('scroll', { direction: 'sideways' }), /direction must be one of/);
+    assert.equal(describeAction({ type: 'scroll', direction: 'down' }), 'scroll down');
+    assert.deepEqual(toolCallForAction({ type: 'scroll', direction: 'left' }, 'r'), { name: 'scroll', input: { reasoning: 'r', direction: 'left' } });
     assert.deepEqual(parseAgentAction('done', {}), { type: 'done', summary: 'Goal complete.' });
     assert.throws(() => parseAgentAction('tap', { x: 'abc', y: 1 }), /x must be a number/);
     assert.throws(() => parseAgentAction('type_text', { text: '' }), /text must be a non-empty string/);
@@ -177,6 +182,57 @@ test('AnthropicVisionModel surfaces API errors', async () => {
     }), /Model returned 401: invalid x-api-key/);
 });
 
+test('scroll becomes a screen-sized flick and app playbooks reach the model', async () => {
+    // "down" = see what is below, so the finger travels from low to high.
+    assert.deepEqual(scrollGesture('down', { width: 390, height: 844 }), { startX: 195, startY: 608, endX: 195, endY: 236 });
+    assert.deepEqual(scrollGesture('up', { width: 390, height: 844 }), { startX: 195, startY: 236, endX: 195, endY: 608 });
+    assert.deepEqual(scrollGesture('left', { width: 390, height: 844 }), { startX: 332, startY: 422, endX: 59, endY: 422 });
+
+    assert.equal(bundleIdFromLabel('Instagram (com.burbn.instagram)'), 'com.burbn.instagram');
+    assert.equal(bundleIdFromLabel('Home screen (SpringBoard)'), 'com.apple.springboard');
+    assert.match(appHintsFor('Home screen (SpringBoard)') ?? '', /call open_app/);
+    assert.equal(bundleIdFromLabel(null), null);
+    const instagram = appHintsFor('Instagram (com.burbn.instagram)') ?? '';
+    assert.match(instagram, /ONE video is on screen at a time/);
+    assert.match(instagram, /scroll with direction "down"/);
+    assert.match(instagram, /toggles/);
+    assert.equal(appHintsFor('Calculator (com.apple.calculator)'), null);
+
+    const request: VlmStepRequest = {
+        goal: 'like 5 reels', stepIndex: 0, maxSteps: 5, screen: { width: 390, height: 844 }, screenshot: Buffer.from('x'),
+        hierarchy: 'Button "ufi-like-button" @(360,375) 40x40', hierarchyTruncated: false, history: [], locked: false,
+        appHints: instagram,
+    };
+    const cloud = buildMessages(request);
+    const cloudText = cloud.at(-1)!.content.filter((block) => block.type === 'text').map((block) => (block as { text: string }).text).join('\n');
+    assert.match(cloudText, /APP HINTS:\n- Instagram: the bottom tab bar/);
+    const local = buildLocalMessages(request);
+    assert.match(local.at(-1)!.content, /APP HINTS \(follow these\):\n- Instagram/);
+    // A step with no hints stays free of the section.
+    assert.doesNotMatch(buildLocalMessages({ ...request, appHints: null }).at(-1)!.content, /APP HINTS/);
+
+    // The tally is ground truth the model cannot lose count of.
+    assert.equal(actionTally([]), 'ACTIONS SO FAR: none executed — nothing has happened yet.');
+    const history: PriorTurn[] = [
+        { app: 'Instagram', elementCount: 1, reasoning: '', action: { type: 'scroll', direction: 'down' }, outcome: 'Executed.' },
+        { app: 'Instagram', elementCount: 1, reasoning: '', action: { type: 'tap', x: 360, y: 375, target: 'Like' }, outcome: 'Executed.' },
+        { app: 'Instagram', elementCount: 1, reasoning: '', action: { type: 'tap', x: 360, y: 375, target: 'Like' }, outcome: 'FAILED: Blocked: repeat tap' },
+        { app: 'Instagram', elementCount: 1, reasoning: '', action: { type: 'scroll', direction: 'down' }, outcome: 'Executed.' },
+    ];
+    assert.equal(actionTally(history), 'ACTIONS SO FAR: scroll down ×2, tap (Like) ×1 (1 attempted action was blocked or failed and did nothing). Last executed action: scroll down.');
+    assert.equal(actionTally(history.slice(0, 3)), 'ACTIONS SO FAR: scroll down ×1, tap (Like) ×1 (1 attempted action was blocked or failed and did nothing). Last executed action: tap (Like).');
+    assert.match(buildLocalMessages({ ...request, history }).at(-1)!.content, /ACTIONS SO FAR: scroll down ×2/);
+});
+
+test('AgentDevice performs scroll as a swipe sized to the screen', async () => {
+    const log: string[] = [];
+    const remote = fakeRemote(log);
+    const device = new AgentDevice(remote, 'udid-scroll');
+    await device.perform({ type: 'scroll', direction: 'down' });
+    const performed = log.filter((entry) => entry.startsWith('perform:')).map((entry) => JSON.parse(entry.slice('perform:'.length)) as RemoteAction);
+    assert.deepEqual(performed, [{ type: 'swipe', startX: 195, startY: 608, endX: 195, endY: 236, durationMs: 280 }]);
+});
+
 test('OllamaVisionModel asks for structured JSON and maps it onto an action', async () => {
     let captured: { url: string; body: Record<string, unknown> } | null = null;
     const model = new OllamaVisionModel({
@@ -211,6 +267,7 @@ test('OllamaVisionModel asks for structured JSON and maps it onto an action', as
     assert.equal(sent.url, 'http://ollama.test/api/chat');
     assert.equal(sent.body.model, 'qwen3-vl:8b');
     assert.equal(sent.body.stream, false);
+    assert.equal(sent.body.think, false, 'hidden chain-of-thought is disabled so the reply is the JSON action');
     assert.equal((sent.body.format as { type: string }).type, 'object', 'structured output schema is enforced');
     const messages = sent.body.messages as Array<{ role: string; content: string; images?: string[] }>;
     assert.deepEqual(messages.map((message) => message.role), ['system', 'user', 'assistant', 'user']);
@@ -240,6 +297,11 @@ test('OllamaVisionModel tolerates fenced JSON, rejects bad tools, and explains a
         hierarchy: '', hierarchyTruncated: false, history: [], locked: false,
     };
     await assert.rejects(down.decide(request), /Ollama is not reachable/);
+
+    const thoughtOnly = new OllamaVisionModel({
+        fetchImpl: (async () => new Response(JSON.stringify({ message: { role: 'assistant', content: '', thinking: 'Let me look at the screen…' } }))) as typeof fetch,
+    });
+    await assert.rejects(thoughtOnly.decide(request), /spent its whole reply thinking/);
     assert.deepEqual(await down.health(), { reachable: false, version: null, models: [], hasModel: false, error: 'fetch failed' });
 
     const missing = new OllamaVisionModel({
@@ -256,6 +318,47 @@ test('OllamaVisionModel tolerates fenced JSON, rejects bad tools, and explains a
     // Local runs are free regardless of token counts.
     const messages = buildLocalMessages(request);
     assert.equal(messages.at(-1)?.images?.length, 1);
+});
+
+test('the runner refuses a repeat tap on the spot it just tapped and tells the model why', async (context) => {
+    const dataDir = await mkdtemp(path.join(os.tmpdir(), 'agent-run-'));
+    context.after(() => rm(dataDir, { recursive: true, force: true }));
+    const okStep = { index: 0, startedAt: '', durationMs: 0, screen: { width: 390, height: 844 }, screenshot: '', elementCount: 1, app: null, locked: false, reasoning: '', actionLabel: '', result: 'ok' as const, usage: { inputTokens: 0, outputTokens: 0 } };
+    const previous: AgentStep = { ...okStep, action: { type: 'tap', x: 360, y: 374, target: 'Like' } };
+    const blocked: AgentStep = { ...previous, result: 'error', error: 'Blocked' };
+    assert.match(repeatedTapGuard({ type: 'tap', x: 362, y: 371 }, [previous]) ?? '', /already tapped Like/);
+    assert.equal(repeatedTapGuard({ type: 'tap', x: 360, y: 500 }, [previous]), null, 'a different spot is fine');
+    assert.equal(repeatedTapGuard({ type: 'tap', x: 360, y: 374 }, [{ ...previous, action: { type: 'scroll', direction: 'down' } }]), null, 'only tap-after-tap is a flap');
+    assert.equal(repeatedTapGuard({ type: 'tap', x: 360, y: 374 }, [{ ...previous, result: 'error' }]), null, 'a failed tap may be retried');
+    assert.match(repeatedTapGuard({ type: 'tap', x: 360, y: 374 }, [previous, blocked]) ?? '', /Blocked/, 'a blocked turn in between does not reset the guard');
+    assert.equal(repeatedTapGuard({ type: 'tap', x: 360, y: 374 }, [previous, { ...okStep, action: { type: 'wait', seconds: 1 } }]), null, 'wait is the escape hatch');
+    assert.equal(repeatedTapGuard({ type: 'tap', x: 360, y: 374 }, []), null);
+
+    const log: string[] = [];
+    const usage = { inputTokens: 1, outputTokens: 1 };
+    const model = scriptedModel([
+        () => ({ action: { type: 'tap', x: 360, y: 374, target: 'Like' }, reasoning: 'like', usage }),
+        () => ({ action: { type: 'tap', x: 360, y: 374, target: 'Like' }, reasoning: 'like again', usage }),
+        (request) => {
+            assert.match(request.history[1]?.outcome ?? '', /FAILED: Blocked: your last executed action already tapped Like/);
+            return { action: { type: 'tap', x: 360, y: 374, target: 'Like' }, reasoning: 'stubborn', usage };
+        },
+        (request) => {
+            assert.equal(request.history.filter((turn) => /^FAILED/.test(turn.outcome)).length, 2, 'both repeat taps were blocked');
+            return { action: { type: 'scroll', direction: 'down' }, reasoning: 'move on', usage };
+        },
+        () => ({ action: { type: 'done', summary: 'ok' }, reasoning: '', usage }),
+    ]);
+    const runner = new AgentRunner({ remote: fakeRemote(log), model, dataDir, settleMs: 0 });
+    const run = await runner.start({ deviceUdid: 'udid-flap', goal: 'like one reel', maxSteps: 8 });
+    const finished = await finishedRun(runner, run.id);
+    assert.equal(finished.status, 'succeeded');
+    assert.equal(finished.steps[1]?.result, 'error');
+    assert.equal(finished.steps[2]?.result, 'error');
+    assert.match(finished.steps[1]?.error ?? '', /Blocked/);
+    const taps = log.filter((entry) => entry.startsWith('perform:') && entry.includes('"tap"'));
+    assert.equal(taps.length, 1, 'the second tap never reached the phone');
+    assert.ok(finished.log.some((line) => /Blocked ✕/.test(line)));
 });
 
 test('local AgentRunner reports zero cost and blocks a phone the cloud runner is using', async (context) => {

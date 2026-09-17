@@ -7,12 +7,17 @@ export type AgentAction =
     | { type: 'tap'; x: number; y: number; target?: string }
     | { type: 'long_press'; x: number; y: number; durationMs: number; target?: string }
     | { type: 'swipe'; startX: number; startY: number; endX: number; endY: number; durationMs: number }
+    | { type: 'scroll'; direction: ScrollDirection }
     | { type: 'type_text'; text: string }
     | { type: 'press_home' }
     | { type: 'open_app'; bundleId: string }
     | { type: 'wait'; seconds: number }
     | { type: 'done'; summary: string }
     | { type: 'fail'; reason: string };
+
+/** Which way to move through the content — "down" shows what is below / the next item. */
+export type ScrollDirection = 'down' | 'up' | 'left' | 'right';
+export const SCROLL_DIRECTIONS: ScrollDirection[] = ['down', 'up', 'left', 'right'];
 
 export interface AgentToolSchema {
     name: string;
@@ -76,6 +81,15 @@ const BASE_TOOLS: AgentToolSchema[] = [
                 duration_ms: { type: 'integer', description: 'Gesture duration in milliseconds (default 350)' },
             },
             required: ['start_x', 'start_y', 'end_x', 'end_y'],
+        },
+    },
+    {
+        name: 'scroll',
+        description: 'Move one screen through the content, the way a thumb flick would. "down" reveals what is below — in vertical video feeds (Reels, TikTok, Shorts) this goes to the NEXT video; "up" goes back; "left"/"right" page sideways (next/previous home page, carousel item). Prefer this over swipe for feeds and lists.',
+        input_schema: {
+            type: 'object',
+            properties: { direction: { type: 'string', enum: SCROLL_DIRECTIONS } },
+            required: ['direction'],
         },
     },
     {
@@ -144,6 +158,13 @@ export function parseAgentAction(name: string, input: Record<string, unknown>): 
                 endX: integer(input.end_x, 'end_x'), endY: integer(input.end_y, 'end_y'),
                 durationMs: input.duration_ms === undefined ? 350 : Math.min(3_000, Math.max(80, integer(input.duration_ms, 'duration_ms'))),
             };
+        case 'scroll': {
+            const direction = typeof input.direction === 'string' ? input.direction.trim().toLowerCase() : '';
+            if (!SCROLL_DIRECTIONS.includes(direction as ScrollDirection)) {
+                throw new Error(`direction must be one of ${SCROLL_DIRECTIONS.join(', ')}`);
+            }
+            return { type: 'scroll', direction: direction as ScrollDirection };
+        }
         case 'type_text':
             return { type: 'type_text', text: text(input.text, 'text') };
         case 'press_home':
@@ -205,6 +226,7 @@ export function toolCallForAction(action: AgentAction, reasoning: string): { nam
         case 'tap': return { name: 'tap', input: { ...base, x: action.x, y: action.y, ...(action.target ? { target: action.target } : {}) } };
         case 'long_press': return { name: 'long_press', input: { ...base, x: action.x, y: action.y, duration_ms: action.durationMs, ...(action.target ? { target: action.target } : {}) } };
         case 'swipe': return { name: 'swipe', input: { ...base, start_x: action.startX, start_y: action.startY, end_x: action.endX, end_y: action.endY, duration_ms: action.durationMs } };
+        case 'scroll': return { name: 'scroll', input: { ...base, direction: action.direction } };
         case 'type_text': return { name: 'type_text', input: { ...base, text: action.text } };
         case 'press_home': return { name: 'press_home', input: base };
         case 'open_app': return { name: 'open_app', input: { ...base, bundle_id: action.bundleId } };
@@ -219,6 +241,7 @@ export function describeAction(action: AgentAction): string {
         case 'tap': return `tap (${action.x}, ${action.y})${action.target ? ` — ${action.target}` : ''}`;
         case 'long_press': return `long press (${action.x}, ${action.y}) ${action.durationMs}ms${action.target ? ` — ${action.target}` : ''}`;
         case 'swipe': return `swipe (${action.startX}, ${action.startY}) → (${action.endX}, ${action.endY})`;
+        case 'scroll': return `scroll ${action.direction}`;
         case 'type_text': return `type "${action.text.length > 40 ? `${action.text.slice(0, 39)}…` : action.text}"`;
         case 'press_home': return 'press home';
         case 'open_app': return `open ${action.bundleId}`;

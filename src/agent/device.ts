@@ -3,7 +3,7 @@ import crypto from 'node:crypto';
 import sharp from 'sharp';
 
 import type { RemoteAction, ScreenInfo } from '../devices/wda-remote.js';
-import type { AgentAction } from './actions.js';
+import type { AgentAction, ScrollDirection } from './actions.js';
 import { compactHierarchy, type CompactHierarchy } from './hierarchy.js';
 
 /** The slice of WDA control the agent needs. RegistryWdaRemoteControl satisfies this. */
@@ -46,6 +46,29 @@ export function describeForegroundApp(
         return name ? `${name} (${active.bundleId})` : active.bundleId;
     }
     return fromTree;
+}
+
+/**
+ * A thumb-flick sized to the screen. "down" means see what is below, so the
+ * finger travels upward; the stroke stays clear of the bottom tab bar and the
+ * top status area so it lands on the content itself.
+ */
+export function scrollGesture(
+    direction: ScrollDirection,
+    screen: { width: number; height: number },
+): { startX: number; startY: number; endX: number; endY: number } {
+    const midX = Math.round(screen.width / 2);
+    const midY = Math.round(screen.height / 2);
+    const top = Math.round(screen.height * 0.28);
+    const bottom = Math.round(screen.height * 0.72);
+    const left = Math.round(screen.width * 0.15);
+    const right = Math.round(screen.width * 0.85);
+    switch (direction) {
+        case 'down': return { startX: midX, startY: bottom, endX: midX, endY: top };
+        case 'up': return { startX: midX, startY: top, endX: midX, endY: bottom };
+        case 'left': return { startX: right, startY: midY, endX: left, endY: midY };
+        case 'right': return { startX: left, startY: midY, endX: right, endY: midY };
+    }
 }
 
 const MAX_LONG_SIDE = 1568;
@@ -158,6 +181,11 @@ export class AgentDevice {
                     durationMs: action.durationMs,
                 });
                 return;
+            case 'scroll': {
+                const { screenSize } = await this.screenInfo();
+                await this.remote.performAction(this.udid, { type: 'swipe', ...scrollGesture(action.direction, screenSize), durationMs: 280 });
+                return;
+            }
             case 'type_text':
                 await this.remote.typeText(this.udid, action.text);
                 return;

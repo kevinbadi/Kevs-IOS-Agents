@@ -8,8 +8,8 @@
  * set the cloud agent uses.
  */
 
-import { AGENT_TOOLS, parseAgentAction, toolCallForAction, type AgentAction } from './actions.js';
-import { systemPrompt, VlmError, type VisionModel, type VlmDecision, type VlmStepRequest } from './vlm.js';
+import { AGENT_TOOLS, SCROLL_DIRECTIONS, parseAgentAction, toolCallForAction, type AgentAction } from './actions.js';
+import { actionTally, systemPrompt, VlmError, type VisionModel, type VlmDecision, type VlmStepRequest } from './vlm.js';
 
 export const DEFAULT_LOCAL_AGENT_MODEL = 'qwen3-vl:8b';
 export const DEFAULT_OLLAMA_URL = 'http://127.0.0.1:11434';
@@ -30,6 +30,7 @@ const DECISION_SCHEMA = {
         start_y: { type: 'integer' },
         end_x: { type: 'integer' },
         end_y: { type: 'integer' },
+        direction: { type: 'string', enum: SCROLL_DIRECTIONS },
         text: { type: 'string' },
         bundle_id: { type: 'string' },
         seconds: { type: 'number' },
@@ -82,13 +83,16 @@ export function buildLocalMessages(request: VlmStepRequest): OllamaMessage[] {
         '',
         '',
         `TURN ${request.stepIndex + 1} of at most ${request.maxSteps}.`,
+        actionTally(request.history),
         request.locked ? 'The device reports it is LOCKED.' : '',
         request.nudge ? `NOTE: ${request.nudge}` : '',
+        request.appHints ? `\nAPP HINTS (follow these):\n${request.appHints}` : '',
         '',
         `ON-SCREEN ELEMENTS${request.hierarchyTruncated ? ' (truncated)' : ''}:`,
         request.hierarchy,
         '',
-        'The attached image is the CURRENT SCREENSHOT (grid labels are in points). Reply with one JSON object.',
+        'The attached image is the CURRENT SCREENSHOT (grid labels are in points). Describe THIS screen in your reasoning —',
+        'do not copy your earlier reasoning — and reply with one JSON object.',
     ].filter((line, index) => line !== '' || index < 2).join('\n');
     messages.push({ role: 'user', content: userText, images: [request.screenshot.toString('base64')] });
     return messages;
@@ -127,7 +131,7 @@ export function decisionFromJson(payload: Record<string, unknown>): { action: Ag
 }
 
 interface OllamaChatResponse {
-    message?: { role: string; content: string };
+    message?: { role: string; content: string; thinking?: string };
     prompt_eval_count?: number;
     eval_count?: number;
     total_duration?: number;
@@ -187,7 +191,11 @@ export class OllamaVisionModel implements VisionModel {
             stream: false,
             format: DECISION_SCHEMA,
             keep_alive: '30m',
-            options: { temperature: 0.1, num_ctx: this.numCtx, num_predict: 400 },
+            // Qwen3-VL ships as a "thinking" model: left on, it burns the whole output
+            // budget on hidden reasoning and returns an empty answer. The JSON
+            // `reasoning` field is all the deliberation we want.
+            think: false,
+            options: { temperature: 0.1, num_ctx: this.numCtx, num_predict: 600 },
             messages: buildLocalMessages(request),
         };
         let response: Response;
@@ -211,8 +219,14 @@ export class OllamaVisionModel implements VisionModel {
                 ? `Model ${this.model} is not downloaded. Run \`ollama pull ${this.model}\`.`
                 : `Local model returned an error: ${detail}`);
         }
-        const content = payload.message?.content ?? '';
-        if (!content.trim()) throw new VlmError('Local model returned an empty reply');
+        let content = payload.message?.content ?? '';
+        const thinking = payload.message?.thinking ?? '';
+        if (!content.trim() && /\{[\s\S]*"tool"[\s\S]*\}/.test(thinking)) content = thinking;
+        if (!content.trim()) {
+            throw new VlmError(thinking
+                ? 'Local model spent its whole reply thinking and returned no action'
+                : 'Local model returned an empty reply');
+        }
         const decision = decisionFromJson(extractJsonObject(content));
         return {
             ...decision,

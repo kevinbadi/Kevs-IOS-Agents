@@ -16,6 +16,7 @@ import path from 'node:path';
 
 import { describeAction, normalizeCoordinates, type AgentAction } from './actions.js';
 import { AgentDevice, type AgentRemote } from './device.js';
+import { appHintsFor } from './playbook.js';
 import type { VisionModel, VlmUsage } from './vlm.js';
 
 export type AgentRunStatus = 'running' | 'succeeded' | 'failed' | 'stopped';
@@ -96,6 +97,25 @@ const PRICING: Record<string, { input: number; output: number }> = {
     'claude-sonnet-4-6': { input: 3, output: 15 },
     'claude-sonnet-4-5': { input: 3, output: 15 },
 };
+
+const REPEAT_TAP_RADIUS_PT = 12;
+
+/**
+ * Tapping the exact spot you just tapped is almost always a toggle flapping
+ * (like → unlike, follow → unfollow). Refuse it and tell the model why; the
+ * message goes back into its history as the outcome of this turn.
+ */
+export function repeatedTapGuard(action: AgentAction, earlierSteps: AgentStep[]): string | null {
+    if (action.type !== 'tap') return null;
+    // Compare with the last action that actually reached the phone — blocked or failed turns don't count.
+    const previous = [...earlierSteps].reverse().find((step) => step.result === 'ok' && step.action);
+    if (!previous?.action || previous.action.type !== 'tap') return null;
+    const near = Math.abs(action.x - previous.action.x) <= REPEAT_TAP_RADIUS_PT && Math.abs(action.y - previous.action.y) <= REPEAT_TAP_RADIUS_PT;
+    if (!near) return null;
+    const label = action.target ?? previous.action.target ?? `(${action.x}, ${action.y})`;
+    return `Blocked: your last executed action already tapped ${label}. Tapping it again would UNDO it (toggles flip), so it was not performed. `
+        + 'Do NOT tap it again. Scroll down to the next item (or pick a different element) now. If you truly must tap it again, call wait first.';
+}
 
 function estimateCost(model: string, usage: VlmUsage, flavor: 'cloud' | 'local'): number {
     if (flavor === 'local') return 0;
@@ -341,6 +361,7 @@ export class AgentRunner {
                     }] : [])),
                     locked: observation.locked,
                     nudge,
+                    appHints: appHintsFor(observation.app),
                 });
                 step.reasoning = decision.reasoning;
                 const normalized = normalizeCoordinates(decision.action, observation.screen, observation.imageSize);
@@ -381,6 +402,17 @@ export class AgentRunner {
                     appendLog(run, 'Stopped by operator — action not executed');
                     await this.persist(run);
                     break;
+                }
+                const flap = repeatedTapGuard(decision.action, run.steps.slice(0, -1));
+                if (flap) {
+                    step.result = 'error';
+                    step.error = flap;
+                    appendLog(run, `${stepNo} · Blocked ✕ ${flap}`);
+                    step.durationMs = Date.now() - startedAt;
+                    lastFingerprint = observation.fingerprint;
+                    lastActionLabel = step.actionLabel;
+                    await this.persist(run);
+                    continue;
                 }
                 try {
                     await device.perform(decision.action);

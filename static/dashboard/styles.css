@@ -2497,7 +2497,7 @@ dialog#calibrate-dialog { width: min(760px, calc(100% - 28px)); }
 }
 .agent-stats {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 0;
     margin: 6px 0 0;
     padding-top: 12px;

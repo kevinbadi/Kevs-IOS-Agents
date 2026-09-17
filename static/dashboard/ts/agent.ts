@@ -111,7 +111,6 @@ const thoughtText = $<HTMLElement>('#agent-thought-text');
 const thoughtAction = $<HTMLElement>('#agent-thought-action');
 const statSteps = $<HTMLElement>('#agent-stat-steps');
 const statTokens = $<HTMLElement>('#agent-stat-tokens');
-const statCost = $<HTMLElement>('#agent-stat-cost');
 const statElapsed = $<HTMLElement>('#agent-stat-elapsed');
 const outcome = $<HTMLElement>('#agent-outcome');
 const timeline = $<HTMLOListElement>('#agent-timeline');
@@ -254,10 +253,11 @@ function formatTokens(value: number): string {
     return String(value);
 }
 
+/** Total spend for a finished run, shown once in the history list rather than ticking live. */
 function formatCost(value: number): string {
     if (FLAVOR === 'local') return 'free · local';
-    if (value === 0) return '$0.00';
-    return value < 0.01 ? `$${value.toFixed(4)}` : `$${value.toFixed(3)}`;
+    if (value === 0) return '$0.00 total';
+    return `${value < 0.01 ? `$${value.toFixed(4)}` : `$${value.toFixed(3)}`} total`;
 }
 
 function formatElapsed(ms: number): string {
@@ -498,7 +498,6 @@ function renderRun(run: AgentRun): void {
 
     statSteps.textContent = `${run.steps.length} / ${run.maxSteps}`;
     statTokens.textContent = formatTokens(run.usage.inputTokens + run.usage.outputTokens);
-    statCost.textContent = formatCost(run.estimatedCostUsd);
     updateElapsed();
 
     renderStage(run);

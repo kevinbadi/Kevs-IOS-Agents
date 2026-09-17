@@ -43,6 +43,8 @@ export interface VlmStepRequest {
     history: PriorTurn[];
     locked: boolean;
     nudge?: string;
+    /** Playbook lines for the foreground app (see playbook.ts). */
+    appHints?: string | null;
 }
 
 export interface VisionModel {
@@ -72,6 +74,10 @@ export function systemPrompt(screen: { width: number; height: number }): string 
         '- press_home always returns to the home screen; use it to leave any app or dismiss Spotlight.',
         '- Multi-part goals ("open X, then do Y") are complete once every part has happened in order across the',
         '  conversation — call done then. Never redo a part that already succeeded.',
+        '- To move through feeds and lists use scroll ("down" = see what is below / next item). Like, save and follow',
+        '  buttons are toggles: a second tap undoes the first, so act once per item and move on.',
+        '- When the goal counts items ("5 reels"), keep a running tally in your reasoning and move to a new item',
+        '  before repeating an action. Follow any APP HINTS in the observation — they describe how that app works.',
         '- Verify before you declare victory: the screenshot must be consistent with the goal being achieved.',
         '- If the same action has not changed the screen twice, try something different (scroll, back, other element).',
         '- Never enter passwords, payment details, or 2FA codes; call fail and explain instead.',
@@ -82,11 +88,37 @@ export function systemPrompt(screen: { width: number; height: number }): string 
 type ContentBlock = Record<string, unknown>;
 interface Message { role: 'user' | 'assistant'; content: ContentBlock[] }
 
+/**
+ * An objective count of what has actually been done, e.g. "tap ×2, scroll down ×3".
+ * Small models lose count (or copy their earlier reasoning); this is the ground truth.
+ */
+export function actionTally(history: PriorTurn[]): string {
+    // Only actions that reached the phone count; blocked or failed turns changed nothing.
+    const executed = history.filter((turn) => !/^FAILED/i.test(turn.outcome));
+    const blocked = history.length - executed.length;
+    const counts = new Map<string, number>();
+    for (const turn of executed) {
+        const label = turn.action.type === 'scroll' ? `scroll ${turn.action.direction}`
+            : turn.action.type === 'tap' ? `tap${turn.action.target ? ` (${turn.action.target})` : ''}`
+                : turn.action.type.replace('_', ' ');
+        counts.set(label, (counts.get(label) ?? 0) + 1);
+    }
+    const note = blocked ? ` (${blocked} attempted action${blocked === 1 ? ' was' : 's were'} blocked or failed and did nothing)` : '';
+    if (counts.size === 0) return `ACTIONS SO FAR: none executed — nothing has happened yet${note}.`;
+    const last = executed.at(-1)!;
+    const lastLabel = last.action.type === 'scroll' ? `scroll ${last.action.direction}`
+        : last.action.type === 'tap' ? `tap${last.action.target ? ` (${last.action.target})` : ''}`
+            : last.action.type.replace('_', ' ');
+    return `ACTIONS SO FAR: ${[...counts].map(([label, count]) => `${label} ×${count}`).join(', ')}${note}. Last executed action: ${lastLabel}.`;
+}
+
 function observationText(request: VlmStepRequest): string {
     return [
         `TURN ${request.stepIndex + 1} of at most ${request.maxSteps}.`,
+        actionTally(request.history),
         request.locked ? 'The device reports it is LOCKED.' : '',
         request.nudge ? `NOTE: ${request.nudge}` : '',
+        request.appHints ? `\nAPP HINTS:\n${request.appHints}` : '',
         '',
         `ON-SCREEN ELEMENTS${request.hierarchyTruncated ? ' (truncated)' : ''}:`,
         request.hierarchy,

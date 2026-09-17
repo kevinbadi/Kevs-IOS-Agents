@@ -36,7 +36,6 @@ const thoughtText = $('#agent-thought-text');
 const thoughtAction = $('#agent-thought-action');
 const statSteps = $('#agent-stat-steps');
 const statTokens = $('#agent-stat-tokens');
-const statCost = $('#agent-stat-cost');
 const statElapsed = $('#agent-stat-elapsed');
 const outcome = $('#agent-outcome');
 const timeline = $('#agent-timeline');
@@ -170,12 +169,13 @@ function formatTokens(value) {
         return `${(value / 1_000).toFixed(1)}k`;
     return String(value);
 }
+/** Total spend for a finished run, shown once in the history list rather than ticking live. */
 function formatCost(value) {
     if (FLAVOR === 'local')
         return 'free · local';
     if (value === 0)
-        return '$0.00';
-    return value < 0.01 ? `$${value.toFixed(4)}` : `$${value.toFixed(3)}`;
+        return '$0.00 total';
+    return `${value < 0.01 ? `$${value.toFixed(4)}` : `$${value.toFixed(3)}`} total`;
 }
 function formatElapsed(ms) {
     const total = Math.max(0, Math.floor(ms / 1000));
@@ -417,7 +417,6 @@ function renderRun(run) {
     liveNotes.innerHTML = run.notes.map((note) => `<p>${escapeHtml(note)}</p>`).join('');
     statSteps.textContent = `${run.steps.length} / ${run.maxSteps}`;
     statTokens.textContent = formatTokens(run.usage.inputTokens + run.usage.outputTokens);
-    statCost.textContent = formatCost(run.estimatedCostUsd);
     updateElapsed();
     renderStage(run);
     renderLog(run);
