@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Agent · IOS AGENTS</title>
+    <title>Agent (Cloud) · IOS AGENTS</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Syne:wght@600;700;800&display=swap" rel="stylesheet">
@@ -23,7 +23,7 @@
                 <a class="button secondary" href="/">Devices</a>
                 <a class="button secondary" href="/automations">Automations</a>
                 <a class="button secondary" href="/results">Results</a>
-                <a class="button secondary" href="/agent" aria-current="page">Agent</a>
+                <a class="button secondary" href="/agent" aria-current="page">Agent (Cloud)</a>
                 <a class="button secondary" href="/tasks">Tasks</a>
                 __PLUGIN_NAV____AUTH_NAV__
             </nav>
@@ -32,9 +32,9 @@
     <main class="shell agent-shell">
         <header class="page-header agent-header">
             <div>
-                <span class="eyebrow">Agentic workflows · experimental</span>
-                <h1>Agent <em>mode</em></h1>
-                <p>Type a goal in plain English. A vision model looks at the phone, picks one action, runs it through WebDriverAgent, checks the result, and repeats until it is done.</p>
+                <span class="eyebrow">Agentic workflows · cloud model · pay per token</span>
+                <h1>Agent <em>(Cloud)</em></h1>
+                <p>Type a goal in plain English. A hosted Claude vision model looks at the phone, picks one action, runs it through WebDriverAgent, checks the result, and repeats until it is done. Every step is billed to your Anthropic key — the running cost is shown live.</p>
             </div>
             <div id="agent-model-badge" class="agent-model-badge" hidden>
                 <span class="agent-model-dot" aria-hidden="true"></span>
@@ -44,8 +44,8 @@
 
         <section id="agent-unconfigured" class="panel agent-unconfigured" hidden>
             <span class="eyebrow">Setup needed</span>
-            <h2>Add a model key to turn agent mode on</h2>
-            <p>Agent mode is powered by a Claude vision model. Put <code>ANTHROPIC_API_KEY=…</code> in your local <code>.env</code> (it is git-ignored, never commit it) and restart the dashboard. Optional: <code>AGENT_VLM_MODEL</code> defaults to <code>claude-haiku-4-5</code>, the cheapest vision-capable model.</p>
+            <h2>Add a model key to turn the cloud agent on</h2>
+            <p>The cloud agent is powered by a hosted Claude vision model. Put <code>ANTHROPIC_API_KEY=…</code> in your local <code>.env</code> (it is git-ignored, never commit it) and restart the dashboard. Optional: <code>AGENT_VLM_MODEL</code> defaults to <code>claude-haiku-4-5</code>, the cheapest vision-capable model.</p>
         </section>
 
         <div class="agent-grid">

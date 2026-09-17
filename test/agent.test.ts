@@ -352,7 +352,7 @@ test('agent page and API are wired into the app', async (context) => {
 
     const page = await inject(app, { method: 'GET', url: '/agent' });
     assert.equal(page.statusCode, 200);
-    assert.match(page.body, /Agent <em>mode<\/em>/);
+    assert.match(page.body, /Agent <em>\(Cloud\)<\/em>/);
     assert.match(page.body, /\/assets\/agent\.js\?v=[\w-]+/);
     assert.doesNotMatch(page.body, /__FOOTER__/);
 
