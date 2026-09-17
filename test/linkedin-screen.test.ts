@@ -10,7 +10,7 @@ import {
     LINKEDIN_COLD_CONNECT, LINKEDIN_CONNECT, linkedinLabelsForWorkflow, linkedinPointsForWorkflow, parseLinkedInWorkflow,
 } from '../src/linkedin/workflows.js';
 import { connectNoteForLead, DEFAULT_CONNECT_NOTE, markLinkedInContact, parseLinkedInLeadsCsv, pickUncontacted } from '../src/linkedin/leads.js';
-import { leadNameOnScreen, verifyNoteReady, verifyPlainConnectSent, verifyProfile } from '../src/linkedin/verify.js';
+import { alreadyConnectedOnMenu, alreadyConnectedOnProfile, leadNameOnScreen, verifyNoteReady, verifyPlainConnectSent, verifyProfile } from '../src/linkedin/verify.js';
 import type { OcrWord } from '../src/instagram/ocr.js';
 
 const w = (text: string, xPt: number, yPt: number): OcrWord => ({
@@ -69,6 +69,27 @@ test('profile with Search header is not the home feed', () => {
     ], opts).kind, 'profile');
 });
 
+test('home feed with a 2nd-degree post and a followers ad is not a profile', () => {
+    // Captured 2026-09-17: this feed looped the connect run through relaunches.
+    const feed = [
+        w('Search', 175, 68), w('Uriel', 60, 110), w('finds', 130, 110), w('funny', 190, 110),
+        w('Charly', 110, 150), w('Wargnier', 190, 150), w('2nd', 300, 150), w('Follow', 370, 152),
+        w('true', 30, 205), w('story', 70, 205),
+        w('Like', 98, 670), w('Comment', 180, 670), w('Repost', 265, 670), w('Send', 348, 670),
+        w('Cartesia', 110, 715), w('30,422', 100, 735), w('followers', 170, 735), w('Promoted', 100, 752),
+        w('Home', 39, 808), w('My', 100, 808), w('Network', 130, 808), w('Post', 195, 808), w('Notifications', 280, 808), w('Jobs', 350, 808),
+    ];
+    assert.equal(classifyLinkedInScreen(feed, opts).kind, 'home');
+    // Same words but with the degree line in the profile header position and no inline Follow.
+    assert.equal(classifyLinkedInScreen([
+        w('Search', 175, 68), w('Charly', 110, 272), w('2nd', 209, 271), w('followers', 97, 412),
+    ], opts).kind, 'profile');
+    // A feed post whose author line happens to land at profile-header height still has Follow inline.
+    assert.equal(classifyLinkedInScreen([
+        w('Search', 175, 68), w('Someone', 110, 272), w('2nd', 209, 271), w('Follow', 370, 273), w('followers', 97, 412),
+    ], opts).kind, 'home');
+});
+
 test('hidden-connect profile is not the home feed', () => {
     assert.equal(classifyLinkedInScreen([
         w('Search', 175, 68), w('Saleel', 49, 272), w('connections', 97, 406),
@@ -83,6 +104,28 @@ test('About this member sheet', () => {
     assert.equal(classifyLinkedInScreen([
         w('Connect', 80, 502), w('Contact', 80, 450), w('Personalize', 80, 560), w('member', 80, 700),
     ], opts).kind, 'profile-menu');
+});
+
+test('already-connected overflow menu is not the home Search header', () => {
+    assert.equal(classifyLinkedInScreen([
+        w('Search', 195, 68), w('Contact', 80, 430), w('info', 140, 430),
+        w('Share', 80, 380), w('via', 140, 380), w('Remove', 80, 560), w('connection', 160, 560),
+    ], opts).kind, 'profile-menu');
+});
+
+test('Contact info page is not a profile menu', () => {
+    assert.equal(classifyLinkedInScreen([
+        w('Contact', 195, 52), w('info', 250, 52), w('Website', 80, 180),
+        w('Email', 80, 320), w('Phone', 80, 250), w('Connected', 80, 400), w('since', 160, 400),
+    ], opts).kind, 'contact-info');
+});
+
+test('1st-degree Message profiles are already connected', () => {
+    const words = [w('AUROBINDA', 80, 240), w('MONDAL', 200, 240), w('1st', 90, 270), w('Message', 195, 430)];
+    assert.equal(alreadyConnectedOnProfile('profile', words), true);
+    assert.equal(alreadyConnectedOnMenu('profile-menu', [
+        w('Contact', 80, 430), w('info', 140, 430), w('Remove', 80, 560), w('connection', 160, 560),
+    ]), true);
 });
 
 test('Me drawer and own profile are not home or a lead profile', () => {

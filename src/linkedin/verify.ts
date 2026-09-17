@@ -45,6 +45,21 @@ export function verifyProfile(
     return { ok: true };
 }
 
+/** 1st-degree / already-connected profiles show Message, not Connect. */
+export function alreadyConnectedOnProfile(kind: LinkedInScreenKind, words: OcrWord[]): boolean {
+    if (kind !== 'profile') return false;
+    const label = (pattern: RegExp) => words.some((word) => pattern.test(word.text.trim()));
+    if (label(/^Connect$/i) || label(/^Pending$/i)) return false;
+    return label(/^1st$/i) || (label(/^Message$/i) && label(/^Following$/i));
+}
+
+export function alreadyConnectedOnMenu(kind: LinkedInScreenKind, words: OcrWord[]): boolean {
+    if (kind !== 'profile-menu') return false;
+    const label = (pattern: RegExp) => words.some((word) => pattern.test(word.text.trim()));
+    if (label(/^Connect$/i)) return false;
+    return (label(/^Remove$/i) && label(/^connection$/i)) || label(/^Following$/i);
+}
+
 export function verifyProfileMenu(kind: LinkedInScreenKind): VerifyResult {
     if (kind !== 'profile-menu') return { ok: false, reason: `expected profile menu, got ${kind}` };
     return { ok: true };

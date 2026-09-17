@@ -204,6 +204,26 @@ export interface LinkedInLeadCsvSummary {
     remaining: number;
 }
 
+export interface LinkedInConnectFunnel {
+    total: number;
+    sent: number;
+    remaining: number;
+    lists: LinkedInLeadCsvSummary[];
+}
+
+export function rollupLinkedInConnectFunnel(lists: LinkedInLeadCsvSummary[]): LinkedInConnectFunnel {
+    return {
+        total: lists.reduce((sum, list) => sum + list.total, 0),
+        sent: lists.reduce((sum, list) => sum + list.sent, 0),
+        remaining: lists.reduce((sum, list) => sum + list.remaining, 0),
+        lists,
+    };
+}
+
+export async function summarizeLinkedInConnectFunnel(): Promise<LinkedInConnectFunnel> {
+    return rollupLinkedInConnectFunnel(await summarizeLinkedInLeadCsvs());
+}
+
 export async function summarizeLinkedInLeadCsvs(): Promise<LinkedInLeadCsvSummary[]> {
     const directory = linkedInLeadsDirectory();
     let entries: string[];

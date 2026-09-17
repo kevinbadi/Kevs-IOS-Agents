@@ -6,7 +6,7 @@ import path from 'node:path';
 
 import { PluginRegistry } from '../src/registry.js';
 import { createLinkedInPlugin } from '../src/linkedin-plugin.js';
-import { summarizeLinkedInLeadCsvs } from '../src/linkedin/leads.js';
+import { rollupLinkedInConnectFunnel, summarizeLinkedInLeadCsvs } from '../src/linkedin/leads.js';
 
 const plugin = createLinkedInPlugin({ connectEntrypoint: '/example/linkedin-connect.js' });
 
@@ -71,6 +71,21 @@ test('summarizeLinkedInLeadCsvs counts remaining against shared state', async ()
         assert.equal(lists[0]?.total, 2);
         assert.equal(lists[0]?.sent, 1);
         assert.equal(lists[0]?.remaining, 1);
+        const funnel = rollupLinkedInConnectFunnel(lists);
+        assert.equal(funnel.total, 2);
+        assert.equal(funnel.sent, 1);
+        assert.equal(funnel.remaining, 1);
+        const stacked = rollupLinkedInConnectFunnel([
+            { name: 'a', total: 10, sent: 3, remaining: 7 },
+            { name: 'b', total: 4, sent: 4, remaining: 0 },
+        ]);
+        assert.deepEqual(stacked, {
+            total: 14, sent: 7, remaining: 7,
+            lists: [
+                { name: 'a', total: 10, sent: 3, remaining: 7 },
+                { name: 'b', total: 4, sent: 4, remaining: 0 },
+            ],
+        });
     } finally {
         if (previous === undefined) delete process.env.LINKEDIN_LEADS_DIR;
         else process.env.LINKEDIN_LEADS_DIR = previous;

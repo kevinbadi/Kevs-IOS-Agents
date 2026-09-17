@@ -44,7 +44,8 @@ import {
     verifyNoteReady,
     verifyPlainConnectSent,
     verifyProfile,
-    verifyProfileMenu,
+    alreadyConnectedOnMenu,
+    alreadyConnectedOnProfile,
 } from './verify.js';
 
 const deviceUdid = process.env.IOS_UDID;
@@ -77,6 +78,7 @@ const remote = new WdaRemoteControl({
     passcode: await passcodeForDevice(udid),
     passcodeKeypadLayout: resolved.passcodeKeypad,
 });
+let wdaSession: string | undefined;
 
 const runId = new Date().toISOString().replace(/[:.]/g, '-');
 const sessionDir = path.join(outRoot, runId);
@@ -161,6 +163,42 @@ async function launchLinkedIn(): Promise<string | undefined> {
     return payload.sessionId ?? payload.value?.sessionId;
 }
 
+/** TikTok-style recovery: kill LinkedIn and reopen instead of tapping through a stuck sheet. */
+async function relaunchLinkedIn(reason = 'recover'): Promise<void> {
+    console.log(`Relaunching LinkedIn to ${reason}`);
+    const terminate = wdaSession
+        ? `/session/${wdaSession}/wda/apps/terminate`
+        : '/wda/apps/terminate';
+    const launch = wdaSession
+        ? `/session/${wdaSession}/wda/apps/launch`
+        : '/wda/apps/launch';
+    try {
+        await remote.request(terminate, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ bundleId: LINKEDIN_BUNDLE_ID }),
+        });
+    } catch (error) {
+        console.log(`terminateApp: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    await pause(900);
+    try {
+        await remote.request(launch, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ bundleId: LINKEDIN_BUNDLE_ID }),
+        });
+    } catch (error) {
+        console.log(`launchApp: ${error instanceof Error ? error.message : String(error)}`);
+        try {
+            wdaSession = await launchLinkedIn();
+        } catch (inner) {
+            console.log(`relaunch session failed: ${inner instanceof Error ? inner.message : String(inner)}`);
+        }
+    }
+    await pause(3500);
+}
+
 async function typeText(wdaSession: string, text: string): Promise<void> {
     await remote.request(`/session/${wdaSession}/wda/keys`, {
         method: 'POST',
@@ -177,6 +215,21 @@ async function snapshot(label: string): Promise<{ kind: LinkedInScreenKind; word
     await writeFile(path.join(sessionDir, `${label}.png`), image);
     console.log(`${label} → ${screen.kind}`);
     return { kind: screen.kind, words, scale };
+}
+
+/**
+ * Search results and profiles sometimes render as a blank white page for a
+ * couple of seconds (only the query and the tab bar are visible). Give the
+ * page time to settle before deciding what it is.
+ */
+async function snapshotSettled(label: string): Promise<{ kind: LinkedInScreenKind; words: OcrWord[]; scale: number }> {
+    let shot = await snapshot(label);
+    for (let attempt = 1; attempt <= 2 && shot.kind === 'unknown' && shot.words.length < 10; attempt += 1) {
+        console.log('Page looks blank — waiting for it to load');
+        await pause(2000);
+        shot = await snapshot(`${label}-wait${attempt}`);
+    }
+    return shot;
 }
 
 async function tap(name: LinkedInCalibratablePoint, label: string): Promise<void> {
@@ -212,15 +265,27 @@ async function openSearch(label: string): Promise<boolean> {
     for (let attempt = 0; attempt < 6; attempt += 1) {
         const screen = await snapshot(`${label}-nav-${attempt}`);
         if (screen.kind === 'search') return true;
+        if (screen.kind === 'contact-info' || screen.kind === 'member-sheet') {
+            await relaunchLinkedIn();
+            continue;
+        }
+        if (screen.kind === 'unknown' && attempt >= 1) {
+            await relaunchLinkedIn();
+            continue;
+        }
         if (screen.kind === 'me-drawer') {
             await dismissMeDrawer();
             continue;
         }
-        if (screen.kind === 'member-sheet' || screen.kind === 'connect-sheet' || screen.kind === 'connect-note') {
+        if (screen.kind === 'connect-sheet' || screen.kind === 'connect-note') {
             await dismissSheet();
             continue;
         }
         if (screen.kind === 'me' || screen.kind === 'profile' || screen.kind === 'profile-menu' || screen.kind === 'connect-sent') {
+            if (attempt >= 1) {
+                await relaunchLinkedIn();
+                continue;
+            }
             await tap('homeTab', 'Home');
             continue;
         }
@@ -249,18 +314,18 @@ async function tapSendWithoutNote(words?: OcrWord[], scale?: number): Promise<vo
 
 async function bail(lead: LinkedInLead, reason: string): Promise<LeadResult> {
     console.log(`Cross off ${lead.fullName}: ${reason}`);
-    try {
-        await tap('homeTab', 'Home');
-    } catch {
-        // still record the skip
-    }
+    await relaunchLinkedIn();
     return { lead: lead.fullName, status: 'skipped', reason };
+}
+
+async function afterSent(lead: LinkedInLead, reason?: string): Promise<LeadResult> {
+    await relaunchLinkedIn(reason ? `continue after ${reason}` : 'continue after send');
+    return { lead: lead.fullName, status: 'sent', reason };
 }
 
 async function processLead(
     lead: LinkedInLead,
     index: number,
-    wdaSession: string,
 ): Promise<LeadResult> {
     const query = searchQueryForLead(lead);
     const note = connectMode === 'plain' ? '' : connectNoteForLead(lead, noteTemplate);
@@ -272,6 +337,7 @@ async function processLead(
     if (!opened) return bail(lead, 'could not open search');
     await tap('searchField', 'Search bar');
     await pause(400);
+    if (!wdaSession) throw new Error('WebDriverAgent session is required to type');
     await typeText(wdaSession, '\b'.repeat(48));
     await pause(300);
     await typeText(wdaSession, query);
@@ -283,30 +349,38 @@ async function processLead(
         if (people) await tapPoint(people.x, people.y, 'People filter');
         else await tap('searchPeopleFilter', 'People filter');
         await pause(1200);
-        profile = await snapshot(`${tag}-02-results`);
+        profile = await snapshotSettled(`${tag}-02-results`);
     }
     if (!(verifyProfile(profile.kind, profile.words, lead).ok)) {
         await tap('searchFirstResult', 'Select person');
-        profile = await snapshot(`${tag}-03-profile`);
+        profile = await snapshotSettled(`${tag}-03-profile`);
     }
 
     const onProfile = verifyProfile(profile.kind, profile.words, lead);
     if (!onProfile.ok) {
         if (onProfile.reason === 'already pending') {
-            await tap('homeTab', 'Home');
-            return { lead: lead.fullName, status: 'sent', reason: 'already pending' };
+            return afterSent(lead, 'already pending');
         }
         return bail(lead, onProfile.reason ?? 'not on profile');
     }
+    if (alreadyConnectedOnProfile(profile.kind, profile.words)) {
+        console.log(`${lead.fullName} is already a connection — crossing off`);
+        return afterSent(lead, 'already connected');
+    }
 
     let sheet: { kind: LinkedInScreenKind; words: OcrWord[]; scale: number } | undefined;
+    // Where the on-profile Connect button lives when we had to find it via the ⋯ row,
+    // so a missed tap can be retried on the neighbouring offsets.
+    let connectRow: { x: number; y: number } | undefined;
     const visibleConnect = findLabel(profile.words, /^Connect$/i, profile.scale, [220, 640]);
     if (visibleConnect) {
         await tapPoint(visibleConnect.x, visibleConnect.y, 'Connect');
+        connectRow = visibleConnect;
     } else {
         const dots = findProfileMenuTarget(profile.words, profile.scale);
         let menu = profile;
         let openedMenu = false;
+        let menuRowY = dots.y;
         for (const [offsetIndex, y] of [dots.y, dots.y - 16, dots.y + 16].entries()) {
             await tapPoint(dots.x, y, 'Click profile menu');
             menu = await snapshot(`${tag}-04-menu-${offsetIndex}`);
@@ -314,24 +388,33 @@ async function processLead(
                 sheet = menu;
                 break;
             }
+            if (menu.kind === 'contact-info' || menu.kind === 'member-sheet') {
+                await relaunchLinkedIn();
+                return { lead: lead.fullName, status: 'skipped', reason: 'opened contact info' };
+            }
             if (menu.kind === 'profile-menu') {
                 openedMenu = true;
+                menuRowY = y;
                 break;
             }
-            if (menu.kind === 'member-sheet') await dismissSheet();
         }
         if (!sheet && openedMenu) {
             if (findLabel(menu.words, /^Pending$/i, menu.scale, [400, 700])) {
-                await tap('homeTab', 'Home');
-                return { lead: lead.fullName, status: 'sent', reason: 'already pending' };
+                return afterSent(lead, 'already pending');
+            }
+            if (alreadyConnectedOnMenu(menu.kind, menu.words)) {
+                console.log(`${lead.fullName} is already a connection — crossing off`);
+                return afterSent(lead, 'already connected');
             }
             const menuConnect = findLabel(menu.words, /^Connect$/i, menu.scale, [400, 640]);
             if (menuConnect) {
                 await tapPoint(menuConnect.x, menuConnect.y, 'Connect');
             } else {
-                // 2nd degree: Connect is on the profile (same row as ⋯). Menu shows Follow.
+                // 2nd degree: Connect is on the profile (same row as ⋯ — use the
+                // offset that actually opened the menu). Menu shows Follow.
                 await dismissSheet();
-                await tapPoint(li.follow.x, dots.y, 'Connect');
+                connectRow = { x: li.follow.x, y: menuRowY };
+                await tapPoint(connectRow.x, connectRow.y, 'Connect');
             }
         } else if (!sheet) {
             return bail(lead, 'profile menu did not open');
@@ -339,13 +422,27 @@ async function processLead(
     }
 
     if (connectMode === 'plain') {
-        console.log('Sheet up — tapping Send without note now');
-        if (sheet) {
-            await tapSendWithoutNote(sheet.words, sheet.scale);
-        } else {
+        if (!sheet) {
+            // Never tap the calibrated "Send without note" spot blind: on a bare
+            // profile it lands on the Post tab and opens the composer.
             await pause(500);
-            await tapSendWithoutNote();
+            sheet = await snapshot(`${tag}-05-sheet`);
+            if (sheet.kind !== 'connect-sheet' && connectRow) {
+                for (const [retryIndex, dy] of [-14, 14].entries()) {
+                    if (sheet.kind !== 'profile') break;
+                    await tapPoint(connectRow.x, connectRow.y + dy, 'Connect (retry)');
+                    await pause(500);
+                    sheet = await snapshot(`${tag}-05-sheet-retry${retryIndex}`);
+                    if (sheet.kind === 'connect-sheet') break;
+                }
+            }
+            if (sheet.kind === 'connect-sent') return afterSent(lead);
+            if (sheet.kind !== 'connect-sheet') {
+                return bail(lead, `connect sheet did not open (saw ${sheet.kind})`);
+            }
         }
+        console.log('Sheet up — tapping Send without note now');
+        await tapSendWithoutNote(sheet.words, sheet.scale);
         await pause(400);
         let after = await snapshot(`${tag}-06-sent`);
         if (after.kind === 'profile-menu') {
@@ -365,8 +462,7 @@ async function processLead(
         }
         const confirmed = verifyPlainConnectSent(after.kind, after.words, lead);
         if (!confirmed.ok) return bail(lead, confirmed.reason ?? 'send not confirmed');
-        await tap('homeTab', 'Home');
-        return { lead: lead.fullName, status: 'sent' };
+        return afterSent(lead);
     }
 
     if (!sheet) sheet = await snapshot(`${tag}-05-sheet`);
@@ -378,6 +474,7 @@ async function processLead(
     await tapPoint(addNote.x, addNote.y, 'Add note');
     await pause(800);
     await tap('noteComposer', 'Note field');
+    if (!wdaSession) throw new Error('WebDriverAgent session is required to type');
     await typeText(wdaSession, note.slice(0, 200));
     await pause(800);
     const composer = await snapshot(`${tag}-06-note`);
@@ -388,8 +485,7 @@ async function processLead(
         ?? { x: li.sendInvitation.x, y: li.sendInvitation.y, text: 'Add note to invitation (calibrated)' };
     await tapPoint(send.x, send.y, 'Add note to invitation');
     await snapshot(`${tag}-07-sent`);
-    await tap('homeTab', 'Home');
-    return { lead: lead.fullName, status: 'sent' };
+    return afterSent(lead);
 }
 
 console.log(`LinkedIn ${connectMode === 'plain' ? 'connection request' : 'cold-connect'} ${runId} → ${sessionDir}`);
@@ -401,7 +497,6 @@ if (connectMode === 'plain') {
     console.log(`Note: ${noteTemplate}`);
 }
 
-let wdaSession: string | undefined;
 const results: LeadResult[] = [];
 let sent = 0;
 try {
@@ -418,7 +513,7 @@ try {
     for (const [index, lead] of leads.entries()) {
         if (sent >= connectsPerRun) break;
         try {
-            const result = await processLead(lead, index, wdaSession);
+            const result = await processLead(lead, index);
             results.push(result);
             contactState = markLinkedInContact(contactState, lead, result.status, result.reason);
             await saveLinkedInContactState(statePath, contactState);
@@ -430,9 +525,9 @@ try {
             contactState = markLinkedInContact(contactState, lead, 'failed', reason);
             await saveLinkedInContactState(statePath, contactState);
             try {
-                await tap('homeTab', 'Home after failure');
-            } catch {
-                // keep going
+                await relaunchLinkedIn();
+            } catch (inner) {
+                console.log(`Recover after failure: ${inner instanceof Error ? inner.message : String(inner)}`);
             }
         }
     }

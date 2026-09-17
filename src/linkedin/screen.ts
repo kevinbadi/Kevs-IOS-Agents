@@ -18,6 +18,7 @@ export type LinkedInScreenKind =
     | 'connect-sheet'
     | 'connect-sent'
     | 'connect-note'
+    | 'contact-info'
     | 'member-sheet'
     | 'post-composer'
     | 'me'
@@ -55,6 +56,25 @@ function hasProfileOverflow(words: OcrWord[], scale: number): boolean {
     });
 }
 
+/**
+ * Profile header: the degree badge ("· 2nd") sits on the name line right under
+ * the photo (y≈270) and the "500+ connections" / "1,234 followers" line just
+ * below it. Feed posts also show "2nd" (author line) and ads show "followers",
+ * but at arbitrary heights and with a Follow button on the same row as the
+ * degree — so require the profile geometry and no inline Follow.
+ */
+function hasProfileDegreeHeader(words: OcrWord[], scale: number): boolean {
+    const degree = words.find((word) => /^(2nd|3rd)$/i.test(word.text.trim())
+        && centerY(word, scale) >= 220 && centerY(word, scale) <= 340);
+    if (!degree) return false;
+    const degreeY = centerY(degree, scale);
+    const inlineFollow = words.some((word) => /^Follow$/i.test(word.text.trim())
+        && Math.abs(centerY(word, scale) - degreeY) <= 25);
+    if (inlineFollow) return false;
+    return words.some((word) => /^(connections?|followers)$/i.test(word.text.trim())
+        && centerY(word, scale) >= degreeY + 40 && centerY(word, scale) <= degreeY + 200);
+}
+
 /** About / Experience / Activity / Highlights as a left profile section title. */
 function hasProfileSection(words: OcrWord[], scale: number): boolean {
     return words.some((word) => {
@@ -80,6 +100,17 @@ export function classifyLinkedInScreen(words: OcrWord[], { scale }: Options): Li
         return { kind: 'connect-note' };
     }
     if (has(words, /^Personalize$/i, scale) || (has(words, /^Connect$/i, scale, [430, 580]) && has(words, /^Contact$/i, scale))) {
+        return { kind: 'profile-menu' };
+    }
+    if ((has(words, /^Contact$/i, scale, [20, 120]) && has(words, /^info$/i, scale, [20, 120]))
+        || (has(words, /^Website$/i, scale) && has(words, /^Email$/i, scale) && has(words, /^Phone$/i, scale))
+        || (has(words, /^Connected$/i, scale) && has(words, /^since$/i, scale))) {
+        return { kind: 'contact-info' };
+    }
+    if ((has(words, /^Contact$/i, scale, [280, 640]) && has(words, /^info$/i, scale, [280, 640]))
+        || (has(words, /^Remove$/i, scale) && has(words, /^connection$/i, scale))
+        || (has(words, /^Share$/i, scale) && has(words, /^via$/i, scale))
+        || (has(words, /^Send$/i, scale, [300, 560]) && has(words, /^profile$/i, scale, [300, 560]))) {
         return { kind: 'profile-menu' };
     }
     if ((has(words, /^Account$/i, scale) && has(words, /^history$/i, scale))
@@ -130,9 +161,7 @@ export function classifyLinkedInScreen(words: OcrWord[], { scale }: Options): Li
         || (has(words, /^Open$/i, scale, [450, 560]) && has(words, /^work$/i, scale, [450, 560]))
         || hasProfileOverflow(words, scale)
         || hasProfileSection(words, scale)
-        || ((has(words, /^2nd$/i, scale) || has(words, /^3rd$/i, scale))
-            && (has(words, /^connections$/i, scale) || has(words, /^followers$/i, scale)
-                || has(words, /^connection$/i, scale)))) {
+        || hasProfileDegreeHeader(words, scale)) {
         return { kind: 'profile' };
     }
     if ((has(words, /^Settings$/i, scale) && has(words, /^Privacy$/i, scale))
