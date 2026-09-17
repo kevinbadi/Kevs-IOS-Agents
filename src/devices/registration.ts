@@ -371,6 +371,9 @@ export class DeviceRegistrationService implements DeviceRegistrationManager {
             const diagnosis = diagnoseWdaLaunchFailure(result.output) ?? 'WDA preparation failed; inspect the sanitized setup log';
             const target: RegistrationCheckName = /Developer Mode/i.test(diagnosis) ? 'developer' : 'signing';
             session.checks[target] = check('blocked', diagnosis);
+            if (target !== 'developer') {
+                session.checks.developer = check('pending', 'Developer Mode is checked when the Xcode device build succeeds');
+            }
             session.checks.wda = check('failed', diagnosis);
             return;
         }

@@ -2,7 +2,7 @@ export function diagnoseWdaLaunchFailure(output: string): string | undefined {
     if (/Developer Mode.*disabled|enable Developer Mode|requires Developer Mode/i.test(output)) {
         return 'Enable Developer Mode in Settings > Privacy & Security, restart the device, then confirm Enable after it restarts';
     }
-    if (/not paired|pairing.*failed|trust.*computer|InvalidHostID/i.test(output)) {
+    if (/not paired|pairing is in progress|pairing.*failed|trust.*computer|trust dialog|InvalidHostID/i.test(output)) {
         return 'Unlock the device, reconnect USB, and accept Trust This Computer on both the Mac and device';
     }
     if (/invalid code signature|profile has not been explicitly trusted by the user/i.test(output)) {
@@ -24,8 +24,11 @@ export function diagnoseWdaLaunchFailure(output: string): string | undefined {
         && /iOS \d/i.test(output)) {
         return 'IOS_PLATFORM_VERSION in .env is higher than this phone\'s iOS — set it to the oldest device OS in the farm (or lower)';
     }
-    if (/iOS .* is not installed|platform.*not installed|Ineligible destinations/i.test(output)) {
+    if (/iOS .* is not installed|platform.*not installed/i.test(output)) {
         return 'Install the matching iOS platform support from Xcode Settings > Components';
+    }
+    if (/property 'modificationDate'|TEST BUILD FAILED/i.test(output)) {
+        return 'WebDriverAgent failed to compile; inspect the sanitized setup log';
     }
     if (/Executable Path is a Directory|Failed to install or launch the test runner/i.test(output)) {
         return 'WDA build is stale or was corrupted by a concurrent build/launch — run `npm run wda:prepare` again '

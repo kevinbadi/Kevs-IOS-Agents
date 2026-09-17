@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Results · IOS AGENTS</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Syne:wght@600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/assets/styles.css">
+</head>
+<body class="results-page">
+    <header class="topbar">
+        <div class="topbar-inner">
+            <a class="brand" href="/">
+                <span class="brand-mark" aria-hidden="true"></span>
+                <span class="brand-text">
+                    <span class="brand-name">IOS AGENTS</span>
+                    <span class="brand-by">by kevbuilds apps</span>
+                </span>
+            </a>
+            <nav class="topbar-nav">
+                <a class="button secondary" href="/">Devices</a>
+                <a class="button secondary" href="/automations">Automations</a>
+                <a class="button secondary" href="/results" aria-current="page">Results</a>
+                <a class="button secondary" href="/agent">Agent</a>
+                <a class="button secondary" href="/tasks">Tasks</a>
+                __PLUGIN_NAV____AUTH_NAV__
+            </nav>
+        </div>
+    </header>
+    <main class="shell results-shell">
+        <header class="page-header results-header">
+            <div>
+                <span class="eyebrow">Workflow output</span>
+                <h1>Run <em>results</em></h1>
+                <p>What the farm actually did — likes, comments, saves, DMs, and connects.</p>
+            </div>
+            <div class="results-toolbar">
+                <div class="platform-switch" role="tablist" aria-label="Platform">
+                    <button type="button" class="platform-switch-btn" data-platform="all" aria-selected="true">All</button>
+                    <button type="button" class="platform-switch-btn" data-platform="tiktok" aria-selected="false">TikTok</button>
+                    <button type="button" class="platform-switch-btn" data-platform="instagram" aria-selected="false">Instagram</button>
+                    <button type="button" class="platform-switch-btn" data-platform="linkedin" aria-selected="false">LinkedIn</button>
+                </div>
+                <div class="results-range" role="group" aria-label="Date range">
+                    <button type="button" class="results-range-btn" data-days="7">7d</button>
+                    <button type="button" class="results-range-btn is-active" data-days="14">14d</button>
+                    <button type="button" class="results-range-btn" data-days="30">30d</button>
+                </div>
+            </div>
+        </header>
+
+        <section id="results-linkedin" class="panel results-funnel" hidden>
+            <div class="results-hero-copy">
+                <span class="eyebrow">LinkedIn</span>
+                <h2>Connection requests</h2>
+                <p id="results-linkedin-caption" class="results-today-caption">Live lead-list counts.</p>
+            </div>
+            <div id="results-linkedin-stats" class="results-stats"></div>
+            <div id="results-linkedin-bar" class="results-funnel-bar" hidden><span></span></div>
+        </section>
+
+        <section class="panel results-hero">
+            <div class="results-hero-copy">
+                <span class="eyebrow">Totals</span>
+                <h2 id="results-range-heading">Last 14 days</h2>
+                <p id="results-today-caption" class="results-today-caption">Today loading…</p>
+            </div>
+            <div id="results-range" class="results-stats loading-card"><span class="spinner" aria-hidden="true"></span>Loading totals…</div>
+        </section>
+
+        <section class="panel results-chart-panel">
+            <div class="section-heading">
+                <div><span class="eyebrow">Activity</span><h2>Runs per day</h2></div>
+                <p id="results-chart-meta" class="run-meta"></p>
+            </div>
+            <div id="results-daily" class="results-daily" hidden></div>
+        </section>
+
+        <div class="results-split">
+            <section class="panel">
+                <div class="section-heading">
+                    <div><span class="eyebrow">By workflow</span><h2>Automations</h2></div>
+                </div>
+                <div id="results-workflows" class="results-cards loading-card"><span class="spinner" aria-hidden="true"></span>Loading workflows…</div>
+            </section>
+            <section class="panel">
+                <div class="section-heading">
+                    <div><span class="eyebrow">By phone</span><h2>Devices</h2></div>
+                </div>
+                <div id="results-devices" class="results-cards loading-card"><span class="spinner" aria-hidden="true"></span>Loading devices…</div>
+            </section>
+        </div>
+    </main>
+    <script type="module" src="/assets/results.js"></script>
+    <footer class="app-footer">__FOOTER__</footer>
+</body>
+</html>

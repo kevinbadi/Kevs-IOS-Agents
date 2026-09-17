@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNull, lt, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 import { fromDrizzle, type PgBoss } from 'pg-boss';
 import { access, rm } from 'node:fs/promises';
 import path from 'node:path';
@@ -15,6 +15,11 @@ import { initialRunAt, latestDueOccurrence } from './recurrence.js';
 import { DEFAULT_MIN_SCHEDULE_GAP_MINUTES, estimatedTaskWindow, validateTaskInput, windowsTooClose } from './validation.js';
 
 export interface ExecutionDetail extends ExecutionRow { logs: string[] }
+
+export interface ExecutionOutcomeRow {
+    execution: ExecutionRow;
+    summaryLine: string | null;
+}
 
 /** Thrown by setScheduleStatus for a disallowed status change (e.g. resuming a completed schedule). */
 export class ScheduleTransitionError extends Error {}
@@ -119,6 +124,35 @@ export class SchedulerRepository {
         return deviceUdid
             ? query.where(eq(executions.deviceUdid, deviceUdid)).orderBy(desc(executions.createdAt)).limit(limit)
             : query.orderBy(desc(executions.createdAt)).limit(limit);
+    }
+
+    /** Recent runs plus the last finish-summary log line (likes=/sent=/Finished…). */
+    async listExecutionOutcomes(since: Date, deviceUdid?: string, limit = 2000): Promise<ExecutionOutcomeRow[]> {
+        const filters = [gte(executions.createdAt, since)];
+        if (deviceUdid) filters.push(eq(executions.deviceUdid, deviceUdid));
+        const rows = await this.connection.db.select().from(executions)
+            .where(and(...filters))
+            .orderBy(desc(executions.createdAt))
+            .limit(limit);
+        if (!rows.length) return [];
+        const ids = rows.map((row) => row.id);
+        const logRows = await this.connection.db.select({
+            executionId: executionLogs.executionId,
+            line: executionLogs.line,
+            id: executionLogs.id,
+        }).from(executionLogs).where(and(
+            inArray(executionLogs.executionId, ids),
+            sql`${executionLogs.line} ~* ${'Finished|likes=|sent=|TikTok post submitted|Instagram post submitted'}`,
+        ));
+        const latest = new Map<string, { id: number; line: string }>();
+        for (const log of logRows) {
+            const current = latest.get(log.executionId);
+            if (!current || log.id > current.id) latest.set(log.executionId, { id: log.id, line: log.line });
+        }
+        return rows.map((execution) => ({
+            execution,
+            summaryLine: latest.get(execution.id)?.line ?? null,
+        }));
     }
 
     async execution(id: string): Promise<ExecutionDetail | null> {

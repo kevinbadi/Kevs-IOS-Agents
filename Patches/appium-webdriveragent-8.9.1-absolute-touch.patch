@@ -64,7 +64,6 @@
 +      // camera/screen recordings and automation picks the wrong cell.
 +      PHAssetCreationRequest *request = [PHAssetCreationRequest creationRequestForAsset];
 +      request.creationDate = [NSDate date];
-+      request.modificationDate = [NSDate date];
 +      [request addResourceWithType:PHAssetResourceTypeVideo fileURL:fileURL options:nil];
 +      identifier = request.placeholderForCreatedAsset.localIdentifier;
 +    } else {
