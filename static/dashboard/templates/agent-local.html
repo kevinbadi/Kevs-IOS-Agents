@@ -3,13 +3,13 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Agent (Cloud) · IOS AGENTS</title>
+    <title>Agent (Local) · IOS AGENTS</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Syne:wght@600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/assets/styles.css">
 </head>
-<body class="agent-page" data-agent-api="/api/agent" data-agent-flavor="cloud">
+<body class="agent-page agent-page-local" data-agent-api="/api/agent-local" data-agent-flavor="local">
     <header class="topbar">
         <div class="topbar-inner">
             <a class="brand" href="/">
@@ -23,8 +23,8 @@
                 <a class="button secondary" href="/">Devices</a>
                 <a class="button secondary" href="/automations">Automations</a>
                 <a class="button secondary" href="/results">Results</a>
-                <a class="button secondary" href="/agent" aria-current="page">Agent (Cloud)</a>
-                <a class="button secondary" href="/agent-local">Agent (Local)</a>
+                <a class="button secondary" href="/agent">Agent (Cloud)</a>
+                <a class="button secondary" href="/agent-local" aria-current="page">Agent (Local)</a>
                 <a class="button secondary" href="/tasks">Tasks</a>
                 __PLUGIN_NAV____AUTH_NAV__
             </nav>
@@ -33,9 +33,9 @@
     <main class="shell agent-shell">
         <header class="page-header agent-header">
             <div>
-                <span class="eyebrow">Agentic workflows · cloud model · pay per token</span>
-                <h1>Agent <em>(Cloud)</em></h1>
-                <p>Type a goal in plain English. A hosted Claude vision model looks at the phone, picks one action, runs it through WebDriverAgent, checks the result, and repeats until it is done. Every step is billed to your Anthropic key — the running cost is shown live.</p>
+                <span class="eyebrow">Agentic workflows · local model · runs on this Mac · $0</span>
+                <h1>Agent <em>(Local)</em></h1>
+                <p>The exact same observe → reason → act loop as the cloud agent, but the vision model runs on this Mac through <a href="https://ollama.com" target="_blank" rel="noreferrer">Ollama</a>. Screenshots never leave the machine and every step is free — the trade-off is slower steps and a smaller model, which this page lets you compare side by side.</p>
             </div>
             <div id="agent-model-badge" class="agent-model-badge" hidden>
                 <span class="agent-model-dot" aria-hidden="true"></span>
@@ -45,8 +45,18 @@
 
         <section id="agent-unconfigured" class="panel agent-unconfigured" hidden>
             <span class="eyebrow">Setup needed</span>
-            <h2>Add a model key to turn the cloud agent on</h2>
-            <p>The cloud agent is powered by a hosted Claude vision model. Put <code>ANTHROPIC_API_KEY=…</code> in your local <code>.env</code> (it is git-ignored, never commit it) and restart the dashboard. Optional: <code>AGENT_VLM_MODEL</code> defaults to <code>claude-haiku-4-5</code>, the cheapest vision-capable model.</p>
+            <h2 id="agent-unconfigured-title">Local model runtime is not ready</h2>
+            <p id="agent-unconfigured-text">Checking Ollama…</p>
+            <pre id="agent-unconfigured-commands" class="agent-setup-commands" hidden></pre>
+        </section>
+
+        <section id="agent-local-runtime" class="panel agent-runtime" hidden>
+            <span class="eyebrow">Local runtime</span>
+            <dl class="agent-runtime-facts">
+                <div><dt>Server</dt><dd id="agent-runtime-server">—</dd></div>
+                <div><dt>Model</dt><dd id="agent-runtime-model">—</dd></div>
+                <div><dt>Other models pulled</dt><dd id="agent-runtime-models">—</dd></div>
+            </dl>
         </section>
 
         <div class="agent-grid">
@@ -77,10 +87,10 @@
                     </form>
                     <div class="agent-examples">
                         <span class="agent-examples-label">Try</span>
-                        <button type="button" class="agent-example" data-goal="Open Settings and turn on Do Not Disturb">Toggle Do Not Disturb</button>
-                        <button type="button" class="agent-example" data-goal="Open TikTok, search for &quot;phone farm&quot; and like the first video">Like a TikTok</button>
-                        <button type="button" class="agent-example" data-goal="Open Instagram and open the notifications tab">Instagram notifications</button>
+                        <button type="button" class="agent-example" data-goal="Open the Settings app, then return to the home screen.">Open Settings and go home</button>
                         <button type="button" class="agent-example" data-goal="Open Safari and search for today's weather in New York">Safari search</button>
+                        <button type="button" class="agent-example" data-goal="Open Instagram and open the notifications tab">Instagram notifications</button>
+                        <button type="button" class="agent-example" data-goal="Open TikTok, search for &quot;phone farm&quot; and like the first video">Like a TikTok</button>
                     </div>
                 </section>
 
@@ -140,7 +150,7 @@
                         <dl id="agent-stats" class="agent-stats">
                             <div><dt>Steps</dt><dd id="agent-stat-steps">—</dd></div>
                             <div><dt>Tokens</dt><dd id="agent-stat-tokens">—</dd></div>
-                            <div><dt>Est. cost</dt><dd id="agent-stat-cost">—</dd></div>
+                            <div><dt>Cost</dt><dd id="agent-stat-cost">—</dd></div>
                             <div><dt>Elapsed</dt><dd id="agent-stat-elapsed">—</dd></div>
                         </dl>
                     </div>

@@ -20,3 +20,4 @@ data/hinge/
 data/linkedin/
 # Agent mode run captures (screenshots of the phone; keep local)
 data/agent/
+data/agent-local/

@@ -2524,6 +2524,30 @@ dialog#calibrate-dialog { width: min(760px, calc(100% - 28px)); }
 .agent-outcome.stopped { background: rgb(255 255 255 / 3%); }
 
 .agent-timeline-heading { margin: 22px 0 12px; }
+.agent-setup-commands {
+    min-height: 0;
+    margin-top: 12px;
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: #09090b;
+    color: #d7d7de;
+    user-select: all;
+}
+.agent-runtime { margin-bottom: 20px; }
+.agent-runtime-facts {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px;
+    margin: 10px 0 0;
+}
+.agent-runtime-facts dt { color: var(--muted); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+.agent-runtime-facts dd { margin: 4px 0 0; font-size: 13px; overflow-wrap: anywhere; }
+.agent-runtime-facts dd.ok { color: #3dd68c; }
+.agent-runtime-facts dd.bad { color: #ff5c7a; }
+.agent-page-local .agent-model-dot { background: #3dd68c; box-shadow: 0 0 0 4px rgb(61 214 140 / 18%); }
+@media (max-width: 720px) { .agent-runtime-facts { grid-template-columns: 1fr; } }
+
 .agent-log-panel { margin-bottom: 24px; }
 .agent-log-panel pre { min-height: 140px; max-height: 340px; }
 .agent-log-follow {

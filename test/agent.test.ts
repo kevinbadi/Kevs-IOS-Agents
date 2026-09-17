@@ -11,6 +11,7 @@ import { annotateScreenshot, describeForegroundApp, type AgentRemote } from '../
 import { compactHierarchy } from '../src/agent/hierarchy.js';
 import { AgentRunner } from '../src/agent/runner.js';
 import { AnthropicVisionModel, buildMessages, type VisionModel, type VlmDecision, type VlmStepRequest } from '../src/agent/vlm.js';
+import { OllamaVisionModel, buildLocalMessages, decisionFromJson, extractJsonObject } from '../src/agent/local-vlm.js';
 import { createApp } from '../src/api/app.js';
 import { defaultDashboardTheme } from '../src/dashboard-theme.js';
 import type { RemoteAction } from '../src/devices/wda-remote.js';
@@ -176,6 +177,107 @@ test('AnthropicVisionModel surfaces API errors', async () => {
     }), /Model returned 401: invalid x-api-key/);
 });
 
+test('OllamaVisionModel asks for structured JSON and maps it onto an action', async () => {
+    let captured: { url: string; body: Record<string, unknown> } | null = null;
+    const model = new OllamaVisionModel({
+        model: 'qwen3-vl:8b',
+        baseUrl: 'http://ollama.test/',
+        fetchImpl: (async (url: string | URL | Request, init?: RequestInit) => {
+            captured = { url: String(url), body: JSON.parse(String(init?.body)) as Record<string, unknown> };
+            return new Response(JSON.stringify({
+                message: { role: 'assistant', content: '{"reasoning":"The Create button is at the bottom.","tool":"tap","x":195,"y":805,"target":"Create"}' },
+                prompt_eval_count: 2100,
+                eval_count: 40,
+            }), { status: 200 });
+        }) as typeof fetch,
+    });
+    const decision = await model.decide({
+        goal: 'Post a story',
+        stepIndex: 1,
+        maxSteps: 10,
+        screen: { width: 390, height: 844 },
+        screenshot: Buffer.from('jpeg'),
+        hierarchy: 'Button "Create" @(195,805) 60x50',
+        hierarchyTruncated: false,
+        history: [{ app: 'Instagram', elementCount: 12, reasoning: 'Open it first.', action: { type: 'open_app', bundleId: 'com.burbn.instagram' }, outcome: 'Executed.' }],
+        locked: false,
+    });
+    assert.deepEqual(decision.action, { type: 'tap', x: 195, y: 805, target: 'Create' });
+    assert.equal(decision.reasoning, 'The Create button is at the bottom.');
+    assert.deepEqual(decision.usage, { inputTokens: 2100, outputTokens: 40 });
+
+    const sent = captured as { url: string; body: Record<string, unknown> } | null;
+    assert.ok(sent, 'a request was sent');
+    assert.equal(sent.url, 'http://ollama.test/api/chat');
+    assert.equal(sent.body.model, 'qwen3-vl:8b');
+    assert.equal(sent.body.stream, false);
+    assert.equal((sent.body.format as { type: string }).type, 'object', 'structured output schema is enforced');
+    const messages = sent.body.messages as Array<{ role: string; content: string; images?: string[] }>;
+    assert.deepEqual(messages.map((message) => message.role), ['system', 'user', 'assistant', 'user']);
+    assert.match(messages[0]!.content, /OUTPUT FORMAT: respond with exactly one JSON object/);
+    assert.match(messages[1]!.content, /GOAL: Post a story/);
+    assert.deepEqual(JSON.parse(messages[2]!.content), { reasoning: 'Open it first.', tool: 'open_app', bundle_id: 'com.burbn.instagram' });
+    assert.match(messages[3]!.content, /RESULT OF TURN 1: Executed\./);
+    assert.match(messages[3]!.content, /TURN 2 of at most 10/);
+    assert.equal(messages[3]!.images?.length, 1, 'only the current screenshot is attached');
+    assert.equal(messages[1]!.images, undefined);
+});
+
+test('OllamaVisionModel tolerates fenced JSON, rejects bad tools, and explains a missing server', async () => {
+    assert.deepEqual(extractJsonObject('```json\n{"reasoning":"r","tool":"press_home"}\n```'), { reasoning: 'r', tool: 'press_home' });
+    assert.deepEqual(extractJsonObject('Sure! {"reasoning":"r","tool":"wait","seconds":2} done'), { reasoning: 'r', tool: 'wait', seconds: 2 });
+    assert.throws(() => extractJsonObject('no json here'), /not JSON/);
+
+    assert.deepEqual(decisionFromJson({ reasoning: 'r', tool: 'swipe', start_x: 195, start_y: 700, end_x: 195, end_y: 300, text: '' }).action, {
+        type: 'swipe', startX: 195, startY: 700, endX: 195, endY: 300, durationMs: 350,
+    });
+    assert.throws(() => decisionFromJson({ reasoning: 'r', tool: 'teleport' }), /unknown tool "teleport"/);
+    assert.throws(() => decisionFromJson({ reasoning: 'r', tool: 'tap', x: 'left' }), /invalid tap/);
+
+    const down = new OllamaVisionModel({ fetchImpl: (async () => { throw new TypeError('fetch failed'); }) as typeof fetch });
+    const request = {
+        goal: 'x', stepIndex: 0, maxSteps: 1, screen: { width: 390, height: 844 }, screenshot: Buffer.alloc(0),
+        hierarchy: '', hierarchyTruncated: false, history: [], locked: false,
+    };
+    await assert.rejects(down.decide(request), /Ollama is not reachable/);
+    assert.deepEqual(await down.health(), { reachable: false, version: null, models: [], hasModel: false, error: 'fetch failed' });
+
+    const missing = new OllamaVisionModel({
+        model: 'qwen3-vl:8b',
+        fetchImpl: (async (url: string | URL | Request) => {
+            if (String(url).endsWith('/api/version')) return new Response(JSON.stringify({ version: '0.12.0' }));
+            if (String(url).endsWith('/api/tags')) return new Response(JSON.stringify({ models: [{ name: 'llama3.2:latest' }] }));
+            return new Response(JSON.stringify({ error: 'model "qwen3-vl:8b" not found, try pulling it first' }), { status: 404 });
+        }) as typeof fetch,
+    });
+    await assert.rejects(missing.decide(request), /ollama pull qwen3-vl:8b/);
+    assert.deepEqual(await missing.health(), { reachable: true, version: '0.12.0', models: ['llama3.2:latest'], hasModel: false, error: null });
+
+    // Local runs are free regardless of token counts.
+    const messages = buildLocalMessages(request);
+    assert.equal(messages.at(-1)?.images?.length, 1);
+});
+
+test('local AgentRunner reports zero cost and blocks a phone the cloud runner is using', async (context) => {
+    const dataDir = await mkdtemp(path.join(os.tmpdir(), 'agent-run-'));
+    context.after(() => rm(dataDir, { recursive: true, force: true }));
+    const usage = { inputTokens: 5000, outputTokens: 100 };
+    const model = scriptedModel([() => ({ action: { type: 'done', summary: 'ok' }, reasoning: 'done', usage })]);
+    const cloud = new AgentRunner({ remote: fakeRemote([]), model: scriptedModel([]), dataDir: path.join(dataDir, 'cloud') });
+    const local = new AgentRunner({
+        remote: fakeRemote([]), model, flavor: 'local', dataDir: path.join(dataDir, 'local'), settleMs: 0,
+        isDeviceBusy: async (udid) => cloud.isActiveOn(udid),
+    });
+    assert.equal(local.flavor, 'local');
+    const run = await local.start({ deviceUdid: 'udid-9', goal: 'Free run', maxSteps: 3 });
+    const finished = await finishedRun(local, run.id);
+    assert.equal(finished.status, 'succeeded');
+    assert.equal(finished.usage.inputTokens, 5000);
+    assert.equal(finished.estimatedCostUsd, 0);
+    assert.match(finished.log.at(-1) ?? '', /local · \$0/);
+    assert.equal(local.isActiveOn('udid-9'), false);
+});
+
 function fakeRemote(log: string[], options: { locked?: boolean } = {}) {
     const pngPromise = sharp({ create: { width: 780, height: 1688, channels: 3, background: '#101010' } }).png().toBuffer();
     let screenshots = 0;
@@ -215,7 +317,8 @@ async function finishedRun(runner: AgentRunner, id: string, timeoutMs = 5_000) {
     const started = Date.now();
     for (;;) {
         const run = await runner.get(id);
-        if (run && run.status !== 'running') return run;
+        // finishedAt is stamped in the runner's finally block, after the terminal status.
+        if (run && run.status !== 'running' && run.finishedAt) return run;
         if (Date.now() - started > timeoutMs) throw new Error('Timed out waiting for the run to finish');
         await new Promise((resolve) => setTimeout(resolve, 20));
     }
@@ -342,28 +445,50 @@ test('agent page and API are wired into the app', async (context) => {
     const dataDir = await mkdtemp(path.join(os.tmpdir(), 'agent-run-'));
     context.after(() => rm(dataDir, { recursive: true, force: true }));
     const runner = new AgentRunner({ remote: fakeRemote([]), model: null, dataDir });
+    const localModel = new OllamaVisionModel({ model: 'qwen3-vl:8b', fetchImpl: (async () => { throw new Error('ECONNREFUSED'); }) as typeof fetch });
+    const localRunner = new AgentRunner({ remote: fakeRemote([]), model: localModel, flavor: 'local', dataDir: path.join(dataDir, 'local') });
     const app = await createApp({
         plugins: new PluginRegistry([]),
         scheduler: {} as SchedulerRepository,
         dashboardTheme: defaultDashboardTheme,
         agentRunner: runner,
+        localAgentRunner: localRunner,
     });
     context.after(() => app.close());
 
     const page = await inject(app, { method: 'GET', url: '/agent' });
     assert.equal(page.statusCode, 200);
     assert.match(page.body, /Agent <em>\(Cloud\)<\/em>/);
+    assert.match(page.body, /data-agent-api="\/api\/agent"/);
     assert.match(page.body, /\/assets\/agent\.js\?v=[\w-]+/);
     assert.doesNotMatch(page.body, /__FOOTER__/);
 
+    const localPage = await inject(app, { method: 'GET', url: '/agent-local' });
+    assert.equal(localPage.statusCode, 200);
+    assert.match(localPage.body, /Agent <em>\(Local\)<\/em>/);
+    assert.match(localPage.body, /data-agent-api="\/api\/agent-local"/);
+    assert.match(localPage.body, /data-agent-flavor="local"/);
+
     const home = await inject(app, { method: 'GET', url: '/results' });
-    assert.match(home.body, /href="\/agent"/, 'nav links to the agent page');
+    assert.match(home.body, /href="\/agent"/, 'nav links to the cloud agent page');
+    assert.match(home.body, /href="\/agent-local"/, 'nav links to the local agent page');
 
     const script = await inject(app, { method: 'GET', url: '/assets/agent.js' });
     assert.equal(script.statusCode, 200);
 
     const status = await inject(app, { method: 'GET', url: '/api/agent/status' });
-    assert.deepEqual(status.json(), { configured: false, model: null, defaultMaxSteps: runner.defaultMaxSteps });
+    assert.deepEqual(status.json(), { configured: false, model: null, flavor: 'cloud', defaultMaxSteps: runner.defaultMaxSteps });
+
+    // The local status reports the runtime's health so the page can explain what to install.
+    const localStatus = await inject(app, { method: 'GET', url: '/api/agent-local/status' });
+    const localBody = localStatus.json<{ configured: boolean; model: string; flavor: string; ollama: { reachable: boolean; hasModel: boolean } }>();
+    assert.equal(localBody.configured, true);
+    assert.equal(localBody.model, 'qwen3-vl:8b');
+    assert.equal(localBody.flavor, 'local');
+    assert.equal(localBody.ollama.reachable, false);
+    assert.equal(localBody.ollama.hasModel, false);
+    const localList = await inject(app, { method: 'GET', url: '/api/agent-local/runs' });
+    assert.deepEqual(localList.json(), { runs: [] });
 
     const start = await inject(app, { method: 'POST', url: '/api/agent/runs', payload: { deviceUdid: 'x', goal: 'y' } });
     assert.equal(start.statusCode, 409);

@@ -4,6 +4,10 @@ const $ = (selector) => {
         throw new Error(`Missing ${selector}`);
     return element;
 };
+const optional = (selector) => document.querySelector(selector);
+// The cloud and local pages share this script; the body says which API to talk to.
+const API = document.body.dataset.agentApi ?? '/api/agent';
+const FLAVOR = document.body.dataset.agentFlavor === 'local' ? 'local' : 'cloud';
 const form = $('#agent-form');
 const deviceSelect = $('#agent-device');
 const goalInput = $('#agent-goal');
@@ -39,6 +43,13 @@ const timeline = $('#agent-timeline');
 const livePanel = $('#agent-live');
 const logEl = $('#agent-log');
 const logFollow = $('#agent-log-follow');
+const unconfiguredTitle = optional('#agent-unconfigured-title');
+const unconfiguredText = optional('#agent-unconfigured-text');
+const unconfiguredCommands = optional('#agent-unconfigured-commands');
+const runtimePanel = optional('#agent-local-runtime');
+const runtimeServer = optional('#agent-runtime-server');
+const runtimeModel = optional('#agent-runtime-model');
+const runtimeModels = optional('#agent-runtime-models');
 let currentRunId = new URLSearchParams(location.search).get('run');
 let pollTimer = null;
 let elapsedTimer = null;
@@ -160,6 +171,8 @@ function formatTokens(value) {
     return String(value);
 }
 function formatCost(value) {
+    if (FLAVOR === 'local')
+        return 'free · local';
     if (value === 0)
         return '$0.00';
     return value < 0.01 ? `$${value.toFixed(4)}` : `$${value.toFixed(3)}`;
@@ -204,18 +217,67 @@ async function api(url, init) {
         throw new Error(body.error ?? `Request failed (${response.status})`);
     return body;
 }
+/** Local runtime readiness: Ollama must answer and have the configured model pulled. */
+function renderLocalStatus(status) {
+    const health = status.ollama;
+    const model = status.model ?? 'qwen3-vl:8b';
+    const ready = Boolean(health?.reachable && health?.hasModel);
+    if (runtimePanel) {
+        runtimePanel.hidden = !health?.reachable;
+        if (runtimeServer) {
+            runtimeServer.textContent = health?.reachable ? `Ollama ${health.version ?? ''} · ${status.ollamaUrl ?? ''}`.trim() : 'not running';
+            runtimeServer.className = health?.reachable ? 'ok' : 'bad';
+        }
+        if (runtimeModel) {
+            runtimeModel.textContent = health?.hasModel ? `${model} · ready` : `${model} · not downloaded`;
+            runtimeModel.className = health?.hasModel ? 'ok' : 'bad';
+        }
+        if (runtimeModels) {
+            const others = (health?.models ?? []).filter((name) => name !== model && name !== `${model}:latest`);
+            runtimeModels.textContent = others.length ? others.join(', ') : 'none';
+        }
+    }
+    if (ready)
+        return true;
+    if (!health?.reachable) {
+        if (unconfiguredTitle)
+            unconfiguredTitle.textContent = 'Ollama is not running on this Mac';
+        if (unconfiguredText)
+            unconfiguredText.textContent = `The local agent needs an Ollama server at ${status.ollamaUrl ?? 'http://127.0.0.1:11434'}. Install it once and start it; the model download (~6 GB for ${model}) happens once.`;
+        if (unconfiguredCommands) {
+            unconfiguredCommands.hidden = false;
+            unconfiguredCommands.textContent = `brew install ollama\nbrew services start ollama\nollama pull ${model}`;
+        }
+    }
+    else {
+        if (unconfiguredTitle)
+            unconfiguredTitle.textContent = `Model ${model} is not downloaded yet`;
+        if (unconfiguredText)
+            unconfiguredText.textContent = `Ollama is running but ${model} is missing. Pull it once (about 6 GB), then this page turns on automatically. Set AGENT_LOCAL_MODEL in .env to use a different model.`;
+        if (unconfiguredCommands) {
+            unconfiguredCommands.hidden = false;
+            unconfiguredCommands.textContent = `ollama pull ${model}`;
+        }
+    }
+    return false;
+}
+let statusTimer = null;
 async function loadStatus() {
     try {
-        const status = await api('/api/agent/status');
-        configured = status.configured;
-        unconfigured.hidden = status.configured;
-        modelBadge.hidden = !status.configured;
+        const status = await api(`${API}/status`);
+        const ready = FLAVOR === 'local' ? renderLocalStatus(status) : status.configured;
+        configured = ready;
+        unconfigured.hidden = ready;
+        modelBadge.hidden = !ready;
         modelName.textContent = status.model ?? '';
         if (!maxStepsInput.value)
             maxStepsInput.value = String(status.defaultMaxSteps);
-        startButton.disabled = !status.configured;
-        if (!status.configured)
-            startButton.textContent = 'Model key required';
+        startButton.disabled = !ready;
+        startButton.textContent = ready ? 'Run agent' : (FLAVOR === 'local' ? 'Local model not ready' : 'Model key required');
+        // The local runtime can come up (or finish downloading) while the page is open.
+        if (FLAVOR === 'local' && !ready && statusTimer === null) {
+            statusTimer = window.setTimeout(() => { statusTimer = null; void loadStatus(); }, 10_000);
+        }
     }
     catch (error) {
         unconfigured.hidden = false;
@@ -242,7 +304,7 @@ async function loadDevices() {
 }
 async function loadHistory() {
     try {
-        const { runs } = await api('/api/agent/runs');
+        const { runs } = await api(`${API}/runs`);
         historyEl.classList.remove('loading-card');
         if (!runs.length) {
             historyEl.innerHTML = '<p class="agent-history-empty">No runs yet. The first one will show up here.</p>';
@@ -266,7 +328,7 @@ async function loadHistory() {
 function screenshotUrl(run, step) {
     if (!step.screenshot)
         return null;
-    return `/api/agent/runs/${encodeURIComponent(run.id)}/steps/${step.index}/screenshot`;
+    return `${API}/runs/${encodeURIComponent(run.id)}/steps/${step.index}/screenshot`;
 }
 function positionMarker(step) {
     const action = step.action;
@@ -385,7 +447,7 @@ async function pollRun() {
     if (!currentRunId)
         return;
     try {
-        const run = await api(`/api/agent/runs/${encodeURIComponent(currentRunId)}`);
+        const run = await api(`${API}/runs/${encodeURIComponent(currentRunId)}`);
         if (run.id !== currentRunId)
             return;
         const wasRunning = currentRun?.status === 'running';
@@ -432,7 +494,7 @@ form.addEventListener('submit', async (event) => {
     startButton.disabled = true;
     startButton.textContent = 'Starting…';
     try {
-        const run = await api('/api/agent/runs', {
+        const run = await api(`${API}/runs`, {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({ deviceUdid, goal, maxSteps: Number(maxStepsInput.value) || undefined }),
@@ -455,7 +517,7 @@ stopButton.addEventListener('click', async () => {
     stopButton.disabled = true;
     stopButton.textContent = 'Stopping…';
     try {
-        await api(`/api/agent/runs/${encodeURIComponent(currentRunId)}/stop`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+        await api(`${API}/runs/${encodeURIComponent(currentRunId)}/stop`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
     }
     catch (error) {
         liveMeta.textContent = error instanceof Error ? error.message : 'Could not stop the run';

@@ -70,6 +70,8 @@ export interface AgentRunnerOptions {
     remote: AgentRemote;
     model: VisionModel | null;
     dataDir?: string;
+    /** "cloud" (metered API) or "local" (on-device model, $0). Defaults to cloud. */
+    flavor?: 'cloud' | 'local';
     /** True when the scheduler already has a queued/running task on this phone. */
     isDeviceBusy?(udid: string): Promise<boolean>;
     deviceName?(udid: string): Promise<string | undefined>;
@@ -95,7 +97,8 @@ const PRICING: Record<string, { input: number; output: number }> = {
     'claude-sonnet-4-5': { input: 3, output: 15 },
 };
 
-function estimateCost(model: string, usage: VlmUsage): number {
+function estimateCost(model: string, usage: VlmUsage, flavor: 'cloud' | 'local'): number {
+    if (flavor === 'local') return 0;
     const key = Object.keys(PRICING).find((name) => model.startsWith(name));
     const price = key ? PRICING[key]! : PRICING['claude-haiku-4-5']!;
     return (usage.inputTokens * price.input + usage.outputTokens * price.output) / 1_000_000;
@@ -129,14 +132,26 @@ export class AgentRunner {
     private readonly stopRequested = new Set<string>();
     private readonly active = new Map<string, string>(); // deviceUdid → runId
     readonly dataDir: string;
+    readonly flavor: 'cloud' | 'local';
     private loaded: Promise<void> | null = null;
 
     constructor(private readonly options: AgentRunnerOptions) {
-        this.dataDir = options.dataDir ?? path.resolve(process.env.AGENT_DATA_DIR ?? path.join('data', 'agent'));
+        this.flavor = options.flavor ?? 'cloud';
+        const envDir = this.flavor === 'local' ? process.env.AGENT_LOCAL_DATA_DIR : process.env.AGENT_DATA_DIR;
+        this.dataDir = options.dataDir ?? path.resolve(envDir ?? path.join('data', this.flavor === 'local' ? 'agent-local' : 'agent'));
     }
 
     get configured(): boolean {
         return this.options.model !== null;
+    }
+
+    get model(): VisionModel | null {
+        return this.options.model;
+    }
+
+    /** True while this runner is driving the given phone. Lets sibling runners refuse to double-book it. */
+    isActiveOn(udid: string): boolean {
+        return this.active.has(udid);
     }
 
     get modelName(): string | null {
@@ -215,7 +230,7 @@ export class AgentRunner {
             throw new AgentRunnerError('An agent run is already active on this phone. Stop it first.', 409);
         }
         if (await this.options.isDeviceBusy?.(input.deviceUdid)) {
-            throw new AgentRunnerError('This phone has a scheduled automation queued or running. Wait for it to finish or stop it from the device page.', 409);
+            throw new AgentRunnerError('This phone is busy — a scheduled automation or another agent run is using it. Wait for it to finish or stop it first.', 409);
         }
         const requested = Number(input.maxSteps ?? this.defaultMaxSteps);
         const maxSteps = Number.isInteger(requested) ? Math.min(AGENT_MAX_STEPS_LIMIT, Math.max(1, requested)) : this.defaultMaxSteps;
@@ -335,7 +350,7 @@ export class AgentRunner {
                 step.usage = decision.usage;
                 run.usage.inputTokens += decision.usage.inputTokens;
                 run.usage.outputTokens += decision.usage.outputTokens;
-                run.estimatedCostUsd = estimateCost(run.model, run.usage);
+                run.estimatedCostUsd = estimateCost(run.model, run.usage, this.flavor);
                 if (decision.reasoning) appendLog(run, `${stepNo} · Reason — ${decision.reasoning}`);
                 appendLog(run, `${stepNo} · Act — ${step.actionLabel}`);
 
@@ -402,7 +417,8 @@ export class AgentRunner {
             }
         } finally {
             run.finishedAt = new Date().toISOString();
-            appendLog(run, `Finished · ${run.status} · ${run.steps.length} step${run.steps.length === 1 ? '' : 's'} · ${run.usage.inputTokens + run.usage.outputTokens} tokens · ~$${run.estimatedCostUsd.toFixed(4)}`);
+            const cost = this.flavor === 'local' ? 'local · $0' : `~$${run.estimatedCostUsd.toFixed(4)}`;
+            appendLog(run, `Finished · ${run.status} · ${run.steps.length} step${run.steps.length === 1 ? '' : 's'} · ${run.usage.inputTokens + run.usage.outputTokens} tokens · ${cost}`);
             this.active.delete(run.deviceUdid);
             this.stopRequested.delete(run.id);
             await device.release();
