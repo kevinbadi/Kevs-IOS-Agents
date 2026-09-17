@@ -92,6 +92,7 @@ export class WdaRemoteControl {
     readonly passcode: string | undefined;
     readonly passcodeKeypadLayout: PasscodeKeypadLayout;
     private cachedScreenInfo: ScreenInfo | undefined;
+    private sessionId: string | undefined;
 
     constructor({
         wdaUrl = process.env.WDA_URL ?? 'http://127.0.0.1:8100',
@@ -186,6 +187,110 @@ export class WdaRemoteControl {
         const response = await this.request('/wda/locked');
         const payload = await response.json() as WdaPayload<boolean>;
         return payload.value;
+    }
+
+    /** Accessibility tree of the foreground app as XCUITest XML (coordinates in points). */
+    async getSource(udid: string): Promise<string> {
+        this.assertTarget(udid);
+        const response = await this.request('/source?format=xml');
+        const payload = await response.json() as WdaPayload<unknown>;
+        if (typeof payload.value !== 'string') {
+            throw new RemoteDeviceError('WebDriverAgent returned an invalid page source');
+        }
+        return payload.value;
+    }
+
+    /**
+     * Press Home without waiting for SpringBoard. `/wda/homescreen` errors with
+     * "Timeout waiting until the home screen is visible" whenever Spotlight or a
+     * system sheet is up, even though the button press itself happened.
+     */
+    async pressHome(udid: string): Promise<void> {
+        this.assertTarget(udid);
+        await this.request('/wda/pressButton', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ name: 'home' }),
+        });
+    }
+
+    /** Bundle id + name of the foreground app (SpringBoard when on the home screen). */
+    async getActiveApp(udid: string): Promise<{ bundleId: string; name: string } | null> {
+        this.assertTarget(udid);
+        const response = await this.request('/wda/activeAppInfo');
+        const payload = await response.json() as WdaPayload<{ bundleId?: string; name?: string } | null>;
+        if (!payload.value?.bundleId) return null;
+        return { bundleId: payload.value.bundleId, name: payload.value.name ?? '' };
+    }
+
+    /** Type into whatever element currently has keyboard focus. */
+    async typeText(udid: string, text: string): Promise<void> {
+        this.assertTarget(udid);
+        await this.postWithSessionFallback('/wda/keys', { value: [text] });
+    }
+
+    async launchApp(udid: string, bundleId: string): Promise<void> {
+        this.assertTarget(udid);
+        await this.postWithSessionFallback('/wda/apps/launch', { bundleId });
+    }
+
+    async terminateApp(udid: string, bundleId: string): Promise<void> {
+        this.assertTarget(udid);
+        await this.postWithSessionFallback('/wda/apps/terminate', { bundleId });
+    }
+
+    /** Drop the WDA session this client may have opened for typing / app launches. */
+    async releaseSession(): Promise<void> {
+        const id = this.sessionId;
+        this.sessionId = undefined;
+        if (!id) return;
+        await this.request(`/session/${id}`, { method: 'DELETE' }).catch(() => {});
+    }
+
+    // Some WDA builds only mount /wda/keys and /wda/apps/* inside a session.
+    // Try the sessionless route first; on rejection, open a session bound to
+    // the foreground app and retry there.
+    private async postWithSessionFallback(pathname: string, body: unknown): Promise<void> {
+        const init: RequestInit = {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(body),
+        };
+        if (!this.sessionId) {
+            try {
+                await this.request(pathname, init);
+                return;
+            } catch (error) {
+                if (!(error instanceof RemoteDeviceError) || !/returned 404|returned 405|no such session|invalid session/i.test(error.message)) {
+                    throw error;
+                }
+            }
+        }
+        const sessionId = this.sessionId ?? await this.openSession();
+        try {
+            await this.request(`/session/${sessionId}${pathname}`, init);
+        } catch (error) {
+            if (error instanceof RemoteDeviceError && /invalid session|no such session|returned 404/i.test(error.message)) {
+                this.sessionId = undefined;
+                const fresh = await this.openSession();
+                await this.request(`/session/${fresh}${pathname}`, init);
+                return;
+            }
+            throw error;
+        }
+    }
+
+    private async openSession(): Promise<string> {
+        const response = await this.request('/session', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ capabilities: { alwaysMatch: {} } }),
+        });
+        const payload = await response.json() as { sessionId?: string; value?: { sessionId?: string } };
+        const id = payload.sessionId ?? payload.value?.sessionId;
+        if (!id) throw new RemoteDeviceError('WebDriverAgent did not return a session id');
+        this.sessionId = id;
+        return id;
     }
 
     async unlock(udid: string): Promise<void> {

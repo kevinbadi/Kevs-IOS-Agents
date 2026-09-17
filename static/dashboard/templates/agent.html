@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Agent · IOS AGENTS</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Syne:wght@600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/assets/styles.css">
+</head>
+<body class="agent-page">
+    <header class="topbar">
+        <div class="topbar-inner">
+            <a class="brand" href="/">
+                <span class="brand-mark" aria-hidden="true"></span>
+                <span class="brand-text">
+                    <span class="brand-name">IOS AGENTS</span>
+                    <span class="brand-by">by kevbuilds apps</span>
+                </span>
+            </a>
+            <nav class="topbar-nav">
+                <a class="button secondary" href="/">Devices</a>
+                <a class="button secondary" href="/automations">Automations</a>
+                <a class="button secondary" href="/results">Results</a>
+                <a class="button secondary" href="/agent" aria-current="page">Agent</a>
+                <a class="button secondary" href="/tasks">Tasks</a>
+                __PLUGIN_NAV____AUTH_NAV__
+            </nav>
+        </div>
+    </header>
+    <main class="shell agent-shell">
+        <header class="page-header agent-header">
+            <div>
+                <span class="eyebrow">Agentic workflows · experimental</span>
+                <h1>Agent <em>mode</em></h1>
+                <p>Type a goal in plain English. A vision model looks at the phone, picks one action, runs it through WebDriverAgent, checks the result, and repeats until it is done.</p>
+            </div>
+            <div id="agent-model-badge" class="agent-model-badge" hidden>
+                <span class="agent-model-dot" aria-hidden="true"></span>
+                <span id="agent-model-name">…</span>
+            </div>
+        </header>
+
+        <section id="agent-unconfigured" class="panel agent-unconfigured" hidden>
+            <span class="eyebrow">Setup needed</span>
+            <h2>Add a model key to turn agent mode on</h2>
+            <p>Agent mode is powered by a Claude vision model. Put <code>ANTHROPIC_API_KEY=…</code> in your local <code>.env</code> (it is git-ignored, never commit it) and restart the dashboard. Optional: <code>AGENT_VLM_MODEL</code> defaults to <code>claude-haiku-4-5</code>, the cheapest vision-capable model.</p>
+        </section>
+
+        <div class="agent-grid">
+            <div class="agent-column">
+                <section class="panel agent-compose">
+                    <div class="section-heading">
+                        <div><span class="eyebrow">New run</span><h2>Give the phone a goal</h2></div>
+                    </div>
+                    <form id="agent-form" class="agent-form" autocomplete="off">
+                        <label>
+                            <span>Phone</span>
+                            <select id="agent-device" name="deviceUdid" required>
+                                <option value="">Loading phones…</option>
+                            </select>
+                        </label>
+                        <label>
+                            <span>Goal</span>
+                            <textarea id="agent-goal" name="goal" rows="4" maxlength="1000" placeholder="Open Instagram and like the first post in the feed" required></textarea>
+                        </label>
+                        <div class="agent-form-row">
+                            <label class="agent-steps">
+                                <span>Max steps</span>
+                                <input id="agent-max-steps" name="maxSteps" type="number" min="1" max="60" value="20">
+                            </label>
+                            <button id="agent-start" class="button primary" type="submit">Run agent</button>
+                        </div>
+                        <p id="agent-form-error" class="agent-form-error" role="alert" hidden></p>
+                    </form>
+                    <div class="agent-examples">
+                        <span class="agent-examples-label">Try</span>
+                        <button type="button" class="agent-example" data-goal="Open Settings and turn on Do Not Disturb">Toggle Do Not Disturb</button>
+                        <button type="button" class="agent-example" data-goal="Open TikTok, search for &quot;phone farm&quot; and like the first video">Like a TikTok</button>
+                        <button type="button" class="agent-example" data-goal="Open Instagram and open the notifications tab">Instagram notifications</button>
+                        <button type="button" class="agent-example" data-goal="Open Safari and search for today's weather in New York">Safari search</button>
+                    </div>
+                </section>
+
+                <section class="panel agent-loop-card">
+                    <span class="eyebrow">How a step works</span>
+                    <ol class="agent-loop">
+                        <li><strong>Observe</strong><span>Screenshot + accessibility tree from WebDriverAgent</span></li>
+                        <li><strong>Reason</strong><span>The model maps the goal to a target on screen</span></li>
+                        <li><strong>Act</strong><span>One tool call: tap, swipe, type, open app…</span></li>
+                        <li><strong>Evaluate</strong><span>A fresh capture confirms it worked before the next step</span></li>
+                    </ol>
+                </section>
+
+                <section class="panel agent-history-panel">
+                    <div class="section-heading">
+                        <div><span class="eyebrow">History</span><h2>Recent runs</h2></div>
+                        <button id="agent-refresh" class="button secondary" type="button">Refresh</button>
+                    </div>
+                    <div id="agent-history" class="agent-history loading-card"><span class="spinner" aria-hidden="true"></span>Loading runs…</div>
+                </section>
+            </div>
+
+            <section class="panel agent-live" id="agent-live">
+                <div class="agent-live-head">
+                    <div>
+                        <span class="eyebrow">Live run</span>
+                        <h2 id="agent-live-goal" class="agent-live-goal">No run selected</h2>
+                        <p id="agent-live-meta" class="agent-live-meta">Start a run or pick one from history.</p>
+                    </div>
+                    <div class="agent-live-actions">
+                        <span id="agent-live-status" class="agent-status-pill" hidden></span>
+                        <button id="agent-stop" class="button danger" type="button" hidden>Stop</button>
+                    </div>
+                </div>
+                <div id="agent-live-notes" class="agent-notes" hidden></div>
+                <div class="agent-stage">
+                    <figure class="agent-screen">
+                        <div class="agent-screen-frame">
+                            <img id="agent-screen-img" alt="" hidden>
+                            <div id="agent-screen-empty" class="agent-screen-empty">
+                                <div class="device-icon" aria-hidden="true"></div>
+                                <p>The phone's screen appears here as the agent works.</p>
+                            </div>
+                            <div id="agent-tap-marker" class="agent-tap-marker" hidden></div>
+                        </div>
+                        <figcaption id="agent-screen-caption" class="agent-screen-caption"></figcaption>
+                    </figure>
+                    <div class="agent-thought">
+                        <span class="eyebrow">Current step</span>
+                        <p id="agent-thought-text" class="agent-thought-text">Waiting for the first observation…</p>
+                        <div id="agent-thought-action" class="agent-action-chip" hidden></div>
+                        <dl id="agent-stats" class="agent-stats">
+                            <div><dt>Steps</dt><dd id="agent-stat-steps">—</dd></div>
+                            <div><dt>Tokens</dt><dd id="agent-stat-tokens">—</dd></div>
+                            <div><dt>Est. cost</dt><dd id="agent-stat-cost">—</dd></div>
+                            <div><dt>Elapsed</dt><dd id="agent-stat-elapsed">—</dd></div>
+                        </dl>
+                    </div>
+                </div>
+                <div id="agent-outcome" class="agent-outcome" hidden></div>
+                <div class="section-heading agent-timeline-heading">
+                    <div><span class="eyebrow">Timeline</span><h2>Every step</h2></div>
+                </div>
+                <ol id="agent-timeline" class="agent-timeline"></ol>
+            </section>
+        </div>
+    </main>
+    <script type="module" src="/assets/agent.js"></script>
+    <footer class="app-footer">__FOOTER__</footer>
+</body>
+</html>

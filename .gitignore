@@ -18,3 +18,5 @@ data/leads/state/
 data/hinge/
 # LinkedIn tour captures
 data/linkedin/
+# Agent mode run captures (screenshots of the phone; keep local)
+data/agent/

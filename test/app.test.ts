@@ -56,7 +56,7 @@ test('a configured auth provider adds a Log out link to the nav', async (context
     });
     context.after(() => app.close());
 
-    for (const url of ['/', '/tasks', '/devices/register']) {
+    for (const url of ['/', '/tasks', '/results', '/devices/register']) {
         const res = await inject(app, { method: 'GET', url });
         assert.equal(res.statusCode, 200, url);
         assert.match(res.body, /href="\/auth\/logout"[^>]*>Log out</, url);
@@ -85,7 +85,7 @@ test('a plugin can contribute nav links and register its own routes', async (con
     });
     context.after(() => app.close());
 
-    for (const url of ['/', '/tasks', '/devices/register']) {
+    for (const url of ['/', '/tasks', '/results', '/devices/register']) {
         const res = await inject(app, { method: 'GET', url });
         assert.equal(res.statusCode, 200, url);
         assert.match(res.body, /href="\/stats"[^>]*>Stats</, url);
@@ -143,7 +143,7 @@ test('serves and drives the public registration wizard', async (context) => {
 
     const page = await inject(app, { method: 'GET', url: '/devices/register' });
     assert.equal(page.statusCode, 200);
-    assert.match(page.body, /Register an? (?:iOS )?device/i);
+    assert.match(page.body, /Register a <em>device<\/em>/);
 
     const candidates = await inject(app, { method: 'GET', url: '/api/device-registrations/candidates' });
     assert.equal(candidates.statusCode, 200);
@@ -158,4 +158,64 @@ test('serves and drives the public registration wizard', async (context) => {
     });
     assert.equal(finalized.statusCode, 200);
     assert.equal(finalized.json().finalized, true);
+});
+
+test('GET /api/results aggregates workflow counters from the scheduler', async (context) => {
+    const now = new Date('2026-09-15T20:00:00.000Z');
+    const app = await createApp({
+        plugins: new PluginRegistry([]),
+        scheduler: {
+            async listExecutionOutcomes() {
+                return [{
+                    execution: {
+                        id: '11111111-1111-1111-1111-111111111111',
+                        scheduleId: null,
+                        deviceUdid: 'device-1',
+                        pluginId: 'com.git-agni.tiktok',
+                        taskType: 'doomscroll',
+                        taskVersion: 1,
+                        payload: {},
+                        scheduledFor: now,
+                        deadlineAt: now,
+                        status: 'succeeded',
+                        queueJobId: null,
+                        startedAt: now,
+                        finishedAt: now,
+                        exitCode: 0,
+                        error: null,
+                        stopRequestedAt: null,
+                        createdAt: now,
+                        updatedAt: now,
+                    },
+                    summaryLine: 'Finished doomscroll: videosViewed=4 swipes=4 likes=2 saves=1 comments=1',
+                }];
+            },
+        } as unknown as SchedulerRepository,
+        registrations: registrations(),
+        dashboardTheme: defaultDashboardTheme,
+    });
+    context.after(() => app.close());
+
+    const page = await inject(app, { method: 'GET', url: '/results' });
+    assert.equal(page.statusCode, 200);
+    assert.match(page.body, /Run <em>results<\/em>/);
+    assert.match(page.body, /href="\/results"/);
+    assert.match(page.body, /Connection requests/);
+
+    const res = await inject(app, {
+        method: 'GET',
+        url: '/api/results?days=7&platform=tiktok&timezone=UTC',
+    });
+    assert.equal(res.statusCode, 200);
+    const body = res.json() as {
+        platform: string;
+        range: { likes: number; runs: number };
+        linkedinConnect: { total: number; sent: number; remaining: number };
+    };
+    assert.equal(body.platform, 'tiktok');
+    assert.equal(body.range.likes, 2);
+    assert.equal(body.range.runs, 1);
+    assert.equal(typeof body.linkedinConnect.total, 'number');
+    assert.equal(typeof body.linkedinConnect.sent, 'number');
+    assert.equal(typeof body.linkedinConnect.remaining, 'number');
 });

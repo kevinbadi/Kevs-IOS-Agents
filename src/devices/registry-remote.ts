@@ -32,4 +32,12 @@ export class RegistryWdaRemoteControl implements RemoteControl {
     async getMjpegStream(udid: string, signal?: AbortSignal): Promise<Response> { return (await this.control(udid)).getMjpegStream(udid, signal); }
     async performAction(udid: string, action: RemoteAction): Promise<void> { return (await this.control(udid)).performAction(udid, action); }
     async isLocked(udid: string): Promise<boolean> { return (await this.control(udid)).isLocked(udid); }
+    async unlock(udid: string): Promise<void> { return (await this.control(udid)).unlock(udid); }
+    async getSource(udid: string): Promise<string> { return (await this.control(udid)).getSource(udid); }
+    async pressHome(udid: string): Promise<void> { return (await this.control(udid)).pressHome(udid); }
+    async getActiveApp(udid: string): Promise<{ bundleId: string; name: string } | null> { return (await this.control(udid)).getActiveApp(udid); }
+    async typeText(udid: string, text: string): Promise<void> { return (await this.control(udid)).typeText(udid, text); }
+    async launchApp(udid: string, bundleId: string): Promise<void> { return (await this.control(udid)).launchApp(udid, bundleId); }
+    async terminateApp(udid: string, bundleId: string): Promise<void> { return (await this.control(udid)).terminateApp(udid, bundleId); }
+    async releaseSession(udid: string): Promise<void> { return (await this.control(udid)).releaseSession(); }
 }

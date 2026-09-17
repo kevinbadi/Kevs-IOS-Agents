@@ -28,6 +28,12 @@ import type { AuthProvider, PluginNavLink } from '../plugin.js';
 import type { PluginRegistry } from '../registry.js';
 import type { CreateTaskInput, JsonObject, ScheduleTiming } from '../types.js';
 import { ScheduleTransitionError, type SchedulerRepository } from '../scheduler/repository.js';
+import { summarizeLinkedInConnectFunnel } from '../linkedin/leads.js';
+import { aggregateResults } from '../results/aggregate.js';
+import { isResultsPlatform, resolveResultsTimezone } from '../results/metrics.js';
+import { AgentRunner } from '../agent/runner.js';
+import { registerAgentRoutes } from '../agent/routes.js';
+import { visionModelFromEnv } from '../agent/vlm.js';
 
 export interface CreateAppOptions {
     plugins: PluginRegistry;
@@ -35,6 +41,8 @@ export interface CreateAppOptions {
     authProvider?: AuthProvider | null;
     dashboardTheme?: DashboardTheme;
     registrations?: DeviceRegistrationManager;
+    /** Agent-mode kernel. Omit to build one from ANTHROPIC_API_KEY; pass null to disable the routes. */
+    agentRunner?: AgentRunner | null;
     logger?: boolean;
 }
 
@@ -48,11 +56,15 @@ interface LoadedDashboardTheme {
     deviceHtml: string;
     tasksHtml: string;
     automationsHtml: string;
+    resultsHtml: string;
+    agentHtml: string;
     devicesDemoHtml: string;
     styles: string;
     deviceScript: string;
     tasksScript: string;
     automationsScript: string;
+    resultsScript: string;
+    agentScript: string;
     registerDeviceHtml: string;
     registerDeviceScript: string;
     htmx: string;
@@ -138,7 +150,7 @@ function page(title: string, body: string, logoutPath?: string, navLinks: readon
     return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${escapeHtml(title)}</title><style>
 :root{color-scheme:dark}body{font:15px Outfit,system-ui,sans-serif;margin:0;background:#000;color:#f7f7f8}nav{display:flex;flex-wrap:wrap;gap:14px;align-items:center;padding:14px 24px;background:#0c0c0e;border-bottom:1px solid rgb(255 255 255 / 10%)}nav a{color:#f7f7f8;text-decoration:none;font-weight:650}main{max-width:1100px;margin:24px auto;padding:0 20px}.card{background:#0c0c0e;border:1px solid rgb(255 255 255 / 10%);border-radius:14px;padding:18px;margin:14px 0}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:9px;border-bottom:1px solid rgb(255 255 255 / 8%)}code{font-size:12px}.muted{color:#8a8a93}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px}button,.button{background:linear-gradient(105deg,#ff4b2b,#ff416c);color:white;border:0;border-radius:999px;padding:8px 14px;text-decoration:none;cursor:pointer;font-weight:700}input,select,textarea{padding:8px;border:1px solid rgb(255 255 255 / 14%);border-radius:10px;background:#070708;color:#f7f7f8}</style></head>
-<body><nav><a href="/">Devices</a><a href="/automations">Automations</a><a href="/tasks">Tasks</a><a href="/docs">API</a>${extra}${logout}</nav><main>${body}</main><footer style="max-width:1100px;margin:24px auto;padding:16px 20px;color:#5c5c66;font-size:12px">${FOOTER_HTML}</footer></body></html>`;
+<body><nav><a href="/">Devices</a><a href="/automations">Automations</a><a href="/results">Results</a><a href="/agent">Agent</a><a href="/tasks">Tasks</a><a href="/docs">API</a>${extra}${logout}</nav><main>${body}</main><footer style="max-width:1100px;margin:24px auto;padding:16px 20px;color:#5c5c66;font-size:12px">${FOOTER_HTML}</footer></body></html>`;
 }
 
 async function registeredWithStatus() {
@@ -219,17 +231,21 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
     if (options.dashboardTheme) {
         const root = options.dashboardTheme.rootDirectory;
         const require = createRequire(import.meta.url);
-        const [indexHtml, deviceHtml, tasksHtml, automationsHtml, registerDeviceHtml, devicesDemoHtml, styles, deviceScript, tasksScript, automationsScript, registerDeviceScript, htmx] = await Promise.all([
+        const [indexHtml, deviceHtml, tasksHtml, automationsHtml, resultsHtml, agentHtml, registerDeviceHtml, devicesDemoHtml, styles, deviceScript, tasksScript, automationsScript, resultsScript, agentScript, registerDeviceScript, htmx] = await Promise.all([
             readFile(path.join(root, 'templates/index.html'), 'utf8'),
             readFile(path.join(root, 'templates/device.html'), 'utf8'),
             readFile(path.join(root, 'templates/tasks.html'), 'utf8'),
             readFile(path.join(root, 'templates/automations.html'), 'utf8'),
+            readFile(path.join(root, 'templates/results.html'), 'utf8'),
+            readFile(path.join(root, 'templates/agent.html'), 'utf8'),
             readFile(path.join(root, 'templates/register-device.html'), 'utf8'),
             readFile(path.join(root, 'templates/devices-demo.html'), 'utf8'),
             readFile(path.join(root, 'styles.css'), 'utf8'),
             readFile(path.join(root, 'assets/device.js'), 'utf8'),
             readFile(path.join(root, 'assets/tasks.js'), 'utf8'),
             readFile(path.join(root, 'assets/automations.js'), 'utf8'),
+            readFile(path.join(root, 'assets/results.js'), 'utf8'),
+            readFile(path.join(root, 'assets/agent.js'), 'utf8'),
             readFile(path.join(root, 'assets/register-device.js'), 'utf8'),
             readFile(require.resolve('htmx.org/dist/htmx.min.js'), 'utf8'),
         ]);
@@ -238,6 +254,8 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
         const versions: Record<string, string> = {
             'styles.css': assetHash(styles), 'device.js': assetHash(deviceScript),
             'tasks.js': assetHash(tasksScript), 'automations.js': assetHash(automationsScript),
+            'results.js': assetHash(resultsScript),
+            'agent.js': assetHash(agentScript),
             'register-device.js': assetHash(registerDeviceScript),
             'htmx.min.js': assetHash(htmx),
         };
@@ -250,11 +268,22 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
         themed = {
             indexHtml: finalize(indexHtml), deviceHtml: finalize(deviceHtml),
             tasksHtml: finalize(tasksHtml), automationsHtml: finalize(automationsHtml),
+            resultsHtml: finalize(resultsHtml),
+            agentHtml: finalize(agentHtml),
             registerDeviceHtml: finalize(registerDeviceHtml),
             devicesDemoHtml: finalize(devicesDemoHtml),
-            styles, deviceScript, tasksScript, automationsScript, registerDeviceScript, htmx,
+            styles, deviceScript, tasksScript, automationsScript, resultsScript, agentScript, registerDeviceScript, htmx,
         };
     }
+
+    const agentRunner = options.agentRunner === undefined
+        ? new AgentRunner({
+            remote,
+            model: visionModelFromEnv(),
+            isDeviceBusy: async (udid) => Boolean(await options.scheduler.activeExecution(udid)),
+            deviceName: async (udid) => (await loadRegisteredDevices()).find((device) => device.udid === udid)?.name,
+        })
+        : options.agentRunner;
 
     const renderActivity = async (deviceUdid: string, message?: string): Promise<string> => {
         const executions = await options.scheduler.listExecutions(50, deviceUdid);
@@ -692,6 +721,8 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
         app.get('/assets/tasks.js', asset('text/javascript', theme.tasksScript));
         app.get('/assets/automations.js', asset('text/javascript', theme.automationsScript));
         app.get('/assets/register-device.js', asset('text/javascript', theme.registerDeviceScript));
+        app.get('/assets/results.js', asset('text/javascript', theme.resultsScript));
+        app.get('/assets/agent.js', asset('text/javascript', theme.agentScript));
         app.get('/assets/htmx.min.js', asset('text/javascript', theme.htmx));
         app.get('/api/fragments/devices', async (_request, reply) => {
             const devices = await registeredWithStatus();
@@ -791,7 +822,30 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
     app.get('/automations', async (_request, reply) => reply.type('text/html').send(
         themed?.automationsHtml ?? renderPage('Automations', '<h1>Automations</h1><p>Pre-made templates are available when the dashboard theme is enabled.</p>'),
     ));
-    app.get('/docs', async (_request, reply) => reply.type('text/html').send(renderPage('API', '<h1>API</h1><p>Use <code>/api/plugins</code>, <code>/api/devices</code>, <code>/api/schedules</code>, and <code>/api/executions</code>. This route follows the configured authentication policy.</p>')));
+    app.get('/results', async (_request, reply) => reply.type('text/html').send(
+        themed?.resultsHtml ?? renderPage('Results', '<h1>Results</h1><p>Workflow totals over time. Enable the dashboard theme for the stats page.</p>'),
+    ));
+    app.get<{ Querystring: {
+        days?: string; platform?: string; timezone?: string; deviceUdid?: string;
+    } }>('/api/results', async (request) => {
+        const daysRaw = Number.parseInt(request.query.days ?? '14', 10);
+        const days = Number.isInteger(daysRaw) && daysRaw >= 1 && daysRaw <= 90 ? daysRaw : 14;
+        const platform = isResultsPlatform(request.query.platform) ? request.query.platform : 'all';
+        const timezone = resolveResultsTimezone(request.query.timezone);
+        const since = new Date(Date.now() - days * 86_400_000);
+        const rows = await options.scheduler.listExecutionOutcomes(since, request.query.deviceUdid);
+        const devices = await loadRegisteredDevices();
+        const deviceNames = new Map(devices.map((device) => [device.udid, device.name]));
+        return {
+            ...aggregateResults(rows, { days, timezone, platform, deviceNames }),
+            linkedinConnect: await summarizeLinkedInConnectFunnel(),
+        };
+    });
+    app.get('/agent', async (_request, reply) => reply.type('text/html').send(
+        themed?.agentHtml ?? renderPage('Agent', '<h1>Agent</h1><p>Agent mode drives a phone from a plain-English goal. Enable the dashboard theme for the live view, or use <code>POST /api/agent/runs</code>.</p>'),
+    ));
+    if (agentRunner) registerAgentRoutes(app, agentRunner);
+    app.get('/docs', async (_request, reply) => reply.type('text/html').send(renderPage('API', '<h1>API</h1><p>Use <code>/api/plugins</code>, <code>/api/devices</code>, <code>/api/schedules</code>, <code>/api/executions</code>, and <code>/api/agent/runs</code>. This route follows the configured authentication policy.</p>')));
 
     app.setErrorHandler((error, request, reply) => {
         request.log.error(error);
