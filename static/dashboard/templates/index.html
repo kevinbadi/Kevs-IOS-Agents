@@ -14,7 +14,6 @@
     <header class="topbar">
         <div class="topbar-inner">
             <a class="brand" href="/">
-                <span class="brand-mark" aria-hidden="true"></span>
                 <span class="brand-text">
                     <span class="brand-name">IOS AGENTS</span>
                     <span class="brand-by">by kevbuilds apps</span>
@@ -28,13 +27,63 @@
             <div>
                 <span class="eyebrow">Fleet control</span>
                 <h1>Your <em>devices</em></h1>
-                <p>Pick a connected iPhone to drive it live or queue automation.</p>
+                <p>Pick a connected device to drive it live or queue automation.</p>
             </div>
         </header>
+        <section class="card" aria-labelledby="android-emulators-title">
+            <div class="section-heading">
+                <div><span class="eyebrow">Android lab</span><h2 id="android-emulators-title">Virtual phones</h2></div>
+                <button class="button secondary" id="refresh-emulators" type="button">Refresh</button>
+            </div>
+            <form id="create-emulator" class="inline-actions">
+                <label>Phone name<input name="name" required pattern="[a-zA-Z0-9._-]{1,64}" placeholder="pixel-api"></label>
+                <label>System image<input name="systemImage" value="system-images;android-35;google_apis;x86_64"></label>
+                <label>Device profile<input name="device" value="pixel_2"></label>
+                <button class="button primary" type="submit">Create phone</button>
+            </form>
+            <p id="emulator-message" class="run-meta" aria-live="polite"></p>
+            <div id="emulator-list" class="candidate-list" aria-live="polite">Loading virtual phones...</div>
+        </section>
         <section id="device-list" class="device-list" hx-get="/api/fragments/devices" hx-trigger="load" hx-swap="outerHTML" aria-live="polite">
             <div class="loading-card"><span class="spinner" aria-hidden="true"></span>Looking for connected devices…</div>
         </section>
     </main>
     <footer class="app-footer">__FOOTER__</footer>
+    <script>
+        (function () {
+            const list = document.getElementById('emulator-list');
+            const message = document.getElementById('emulator-message');
+            const form = document.getElementById('create-emulator');
+            function escapeHtml(value) { return String(value).replace(/[&<>'"]/g, function (char) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[char]; }); }
+            async function refresh() {
+                const response = await fetch('/api/android/emulators');
+                const emulators = await response.json();
+                list.innerHTML = emulators.length ? emulators.map(function (emulator) {
+                    const action = emulator.status === 'ready' || emulator.status === 'starting'
+                        ? '<button class="button danger" data-stop="' + encodeURIComponent(emulator.name) + '" type="button">Stop</button>' : '';
+                    const preview = emulator.status === 'ready'
+                        ? '<img class="device-preview" src="/api/android/emulators/' + encodeURIComponent(emulator.name) + '/screenshot?t=' + Date.now() + '" alt="Screen of ' + escapeHtml(emulator.name) + '">'
+                        : '<div class="device-preview-frame unavailable" aria-hidden="true"><div class="device-icon"></div></div>';
+                    return '<div class="candidate-row emulator-row">' + preview + '<div><strong>' + escapeHtml(emulator.name) + '</strong><span class="status ' + escapeHtml(emulator.status) + '">' + escapeHtml(emulator.status) + '</span><span class="run-meta">' + escapeHtml(emulator.udid || emulator.systemImage) + '</span></div>' + action + '</div>';
+                }).join('') : '<p class="run-meta">No virtual phones created yet.</p>';
+            }
+            document.getElementById('refresh-emulators').addEventListener('click', refresh);
+            form.addEventListener('submit', async function (event) {
+                event.preventDefault(); message.textContent = 'Creating...';
+                const body = Object.fromEntries(new FormData(form));
+                const response = await fetch('/api/android/emulators', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+                const result = await response.json(); message.textContent = response.ok ? 'Virtual phone ready.' : (result.error || 'Creation failed.');
+                if (response.ok) { form.reset(); await refresh(); }
+            });
+            list.addEventListener('click', async function (event) {
+                const button = event.target.closest('[data-stop]'); if (!button) return;
+                button.disabled = true;
+                const response = await fetch('/api/android/emulators/' + button.dataset.stop, { method: 'DELETE' });
+                message.textContent = response.ok ? 'Virtual phone stopped.' : 'Could not stop virtual phone.';
+                await refresh();
+            });
+            refresh().catch(function () { message.textContent = 'Android emulator service unavailable.'; });
+        })();
+    </script>
 </body>
 </html>

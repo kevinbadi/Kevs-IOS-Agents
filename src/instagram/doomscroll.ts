@@ -1,6 +1,7 @@
 import { remote, type Browser } from 'webdriverio';
 
 import { loadRegisteredDevices, resolveDeviceCoordinates, WdaRemoteControl } from '@git-agni/phone-farm-core';
+import { appiumCapabilities } from '../devices/appium-capabilities.js';
 import { coordinateProfile, registeredAccounts } from './runtime-settings.js';
 import { switchInstagramAccount, tapCoordinate, typeText } from './actions.js';
 import { detectEngagementControls } from './engagement-controls.js';
@@ -92,12 +93,13 @@ const { startY: swipeStartY, endY: swipeEndY, durationMs: swipeDurationMs } = in
 const swipeAxisX = Math.round(coordinates.screenSize.width * 0.38);
 const wdaUrl = process.env.WDA_URL;
 const instagramBundleId = process.env.INSTAGRAM_BUNDLE_ID ?? 'com.burbn.instagram';
+const registeredPlatform = registeredDevice?.platform ?? 'ios';
 
 const capabilities: WebdriverIO.Capabilities & Record<string, unknown> = {
-    platformName: 'iOS',
-    'appium:automationName': 'XCUITest',
-    'appium:udid': udid,
-    'appium:bundleId': instagramBundleId,
+    ...appiumCapabilities({ udid, platform: registeredPlatform }, {
+        appId: instagramBundleId,
+        forceAppLaunch: true,
+    }),
     'appium:noReset': true,
     'appium:forceAppLaunch': true,
     'appium:shouldTerminateApp': true,
@@ -108,20 +110,22 @@ const capabilities: WebdriverIO.Capabilities & Record<string, unknown> = {
     'appium:showXcodeLog': process.env.SHOW_XCODE_LOG === 'true',
 };
 
-if (wdaUrl) {
+if (registeredPlatform === 'android') delete capabilities['appium:waitForIdleTimeout'];
+
+if (registeredPlatform !== 'android' && wdaUrl) {
     capabilities['appium:webDriverAgentUrl'] = wdaUrl;
     capabilities['appium:wdaRemotePort'] = positiveInteger('WDA_REMOTE_PORT', 8100);
-} else if (process.env.XCODE_ORG_ID) {
+} else if (registeredPlatform !== 'android' && process.env.XCODE_ORG_ID) {
     capabilities['appium:xcodeOrgId'] = process.env.XCODE_ORG_ID;
     capabilities['appium:xcodeSigningId'] = process.env.XCODE_SIGNING_ID ?? 'Apple Development';
 }
-if (!wdaUrl && process.env.WDA_BUNDLE_ID) {
+if (registeredPlatform !== 'android' && !wdaUrl && process.env.WDA_BUNDLE_ID) {
     capabilities['appium:updatedWDABundleId'] = process.env.WDA_BUNDLE_ID;
 }
-if (!wdaUrl && process.env.ALLOW_PROVISIONING_DEVICE_REGISTRATION === 'true') {
+if (registeredPlatform !== 'android' && !wdaUrl && process.env.ALLOW_PROVISIONING_DEVICE_REGISTRATION === 'true') {
     capabilities['appium:allowProvisioningDeviceRegistration'] = true;
 }
-if (!wdaUrl && process.env.WDA_BOOTSTRAP_PATH) {
+if (registeredPlatform !== 'android' && !wdaUrl && process.env.WDA_BOOTSTRAP_PATH) {
     capabilities['appium:useXctestrunFile'] = true;
     capabilities['appium:bootstrapPath'] = process.env.WDA_BOOTSTRAP_PATH;
 }

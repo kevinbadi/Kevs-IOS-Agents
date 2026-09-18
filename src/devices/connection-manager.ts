@@ -158,6 +158,13 @@ export class DeviceConnectionManager implements DeviceConnections {
                 const runtime = this.runtimes.get(device.udid) ?? this.createRuntime(device);
                 runtime.device = device;
                 runtime.status.physical = attached.has(device.udid) ? 'connected' : 'disconnected';
+                if (device.platform === 'android') {
+                    if (runtime.child) await this.stopChild(runtime);
+                    if (attached.has(device.udid) && appiumReady) this.update(runtime, 'ready', 'Android device is ready through Appium');
+                    else if (!attached.has(device.udid)) this.update(runtime, 'disconnected', 'Reconnect the USB cable and enable USB debugging');
+                    else this.update(runtime, 'connecting', 'Waiting for Appium');
+                    return;
+                }
                 if (!runtime.child && this.now() >= runtime.retryAt) this.startChild(runtime);
                 const wdaPort = device.wdaLocalPort ?? Number(process.env.WDA_LOCAL_PORT ?? 8100);
                 const ready = attached.has(device.udid)

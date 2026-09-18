@@ -7,6 +7,8 @@ import type { JsonObject } from '../types.js';
 export interface RegisteredDevice {
     name: string;
     udid: string;
+    /** Defaults to iOS for backwards compatibility with existing devices.json files. */
+    platform?: 'ios' | 'android';
     coordinateProfile?: DeviceProfileName;
     wdaLocalPort?: number;
     mjpegLocalPort?: number;
@@ -53,6 +55,9 @@ export async function loadRegisteredDevices(registryPath = defaultRegistryPath):
         throw new Error(`${registryPath} contains invalid JSON: ${error instanceof Error ? error.message : String(error)}`);
     }
     for (const device of devices) {
+        if (device.platform !== undefined && device.platform !== 'ios' && device.platform !== 'android') {
+            throw new Error(`${registryPath} contains an invalid platform for ${device.udid}`);
+        }
         // Unknown profiles used to throw here and turn every PATCH (including
         // rename) into a generic 400. Fall back so the rest of the farm stays usable.
         try {
@@ -69,6 +74,9 @@ export async function loadRegisteredDevices(registryPath = defaultRegistryPath):
 export async function saveRegisteredDevices(devices: RegisteredDevice[], registryPath = defaultRegistryPath): Promise<void> {
     const unique = new Set<string>();
     for (const device of devices) {
+        if (device.platform !== undefined && device.platform !== 'ios' && device.platform !== 'android') {
+            throw new Error(`Device ${device.udid} has an invalid platform`);
+        }
         coordinatesForProfile(device.coordinateProfile);
         if (device.passcode !== undefined && !PASSCODE_PATTERN.test(device.passcode)) {
             throw new Error(`Device ${device.udid} passcode must contain at least four digits`);

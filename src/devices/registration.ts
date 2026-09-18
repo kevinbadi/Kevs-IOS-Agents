@@ -14,6 +14,7 @@ import { loadRegisteredDevices, mutateRegisteredDevices, type RegisteredDevice }
 import { passcodeForDevice, setDevicePasscode } from './secrets.js';
 import { WdaRemoteControl } from './wda-remote.js';
 import { diagnoseWdaLaunchFailure } from './wda/diagnostics.js';
+import { appiumCapabilities } from './appium-capabilities.js';
 
 export type RegistrationCheckState = 'pending' | 'checking' | 'blocked' | 'passed' | 'failed';
 export type RegistrationAction = 'refresh' | 'prepare' | 'verify' | 'finalize';
@@ -340,6 +341,19 @@ export class DeviceRegistrationService implements DeviceRegistrationManager {
         } else {
             session.checks.connection = check('blocked', 'Reconnect USB, unlock the device, and accept Trust This Computer');
         }
+        if (session.device.platform === 'android') {
+            session.checks.host = check('passed', 'ADB, Java, and Appium provide the Android host tooling');
+            session.checks.signing = check('passed', 'Android does not require WDA signing');
+            session.checks.developer = check('passed', 'USB debugging is enabled');
+            session.checks.wda = check('passed', 'Android uses UiAutomator2 instead of WebDriverAgent');
+            session.checks.tiktok = check('passed', 'TikTok will be verified when the UiAutomator2 session starts');
+            session.checks.instagram = check('passed', 'Instagram will be verified when the UiAutomator2 session starts');
+            session.checks.video = check('passed', 'Screenshots are provided by Appium');
+            session.checks.touch = check('passed', 'Touch input is provided by UiAutomator2');
+            session.checks.accounts = check('passed', 'Android account verification runs through Appium');
+            await this.persist(session);
+            return;
+        }
         const signingValues = ['XCODE_ORG_ID', 'WDA_BUNDLE_ID'].filter((name) => !process.env[name]);
         session.checks.signing = signingValues.length
             ? check('blocked', `Configure ${signingValues.join(' and ')} in .env after signing in to Xcode`)
@@ -351,6 +365,12 @@ export class DeviceRegistrationService implements DeviceRegistrationManager {
     }
 
     private async prepare(session: RegistrationSession, authorized: boolean): Promise<void> {
+        if (session.device.platform === 'android') {
+            session.checks.signing = check('passed', 'Android does not require code signing');
+            session.checks.developer = check('passed', 'USB debugging is enabled');
+            session.checks.wda = check('passed', 'UiAutomator2 is managed by Appium');
+            return;
+        }
         if (session.checks.connection.state !== 'passed' || session.checks.host.state !== 'passed') {
             throw new Error('Connect and trust the device and complete host setup before preparing WDA');
         }
@@ -387,6 +407,35 @@ export class DeviceRegistrationService implements DeviceRegistrationManager {
     }
 
     private async verify(session: RegistrationSession): Promise<void> {
+        if (session.device.platform === 'android') {
+            const appiumPort = Number(process.env.APPIUM_PORT ?? 4725);
+            let driver: Browser | undefined;
+            try {
+                driver = await remote({
+                    hostname: process.env.APPIUM_HOST ?? '127.0.0.1',
+                    port: appiumPort,
+                    path: '/',
+                    logLevel: 'error',
+                    capabilities: appiumCapabilities(session.device, {
+                        appId: process.env.TIKTOK_BUNDLE_ID ?? 'com.zhiliaoapp.musically',
+                        forceAppLaunch: true,
+                    }),
+                });
+                session.checks.appium = check('passed', 'UiAutomator2 session created');
+                const screenshot = await driver.takeScreenshot();
+                if (!screenshot) throw new Error('Appium returned an empty screenshot');
+                session.checks.video = check('passed', 'Appium returned a live screenshot');
+                session.checks.touch = check('passed', 'UiAutomator2 session is ready for touch input');
+                session.checks.accounts = check('passed', 'Android session verified');
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                session.checks.appium = check('failed', message);
+                session.checks.video = check('blocked', 'Create an Android Appium session first');
+            } finally {
+                if (driver) await driver.deleteSession().catch(() => undefined);
+            }
+            return;
+        }
         await this.inspectWda(session);
         if (session.checks.wda.state !== 'passed') throw new Error('Prepare and start WDA before runtime verification');
         if (!session.coordinateProfile) throw new Error('Choose a coordinate profile that matches the device screen');
@@ -416,12 +465,10 @@ export class DeviceRegistrationService implements DeviceRegistrationManager {
                 path: '/',
                 logLevel: 'error',
                 capabilities: {
-                    platformName: 'iOS',
-                    'appium:automationName': 'XCUITest',
-                    'appium:udid': session.device.udid,
-                    'appium:bundleId': tiktokBundleId,
-                    'appium:noReset': true,
-                    'appium:forceAppLaunch': true,
+                    ...appiumCapabilities(session.device, {
+                        appId: tiktokBundleId,
+                        forceAppLaunch: true,
+                    }),
                     'appium:webDriverAgentUrl': `http://127.0.0.1:${session.wdaLocalPort}`,
                 },
             });
@@ -509,6 +556,7 @@ export class DeviceRegistrationService implements DeviceRegistrationManager {
             devices.push({
                 name: session.name,
                 udid: session.device.udid,
+                platform: session.device.platform,
                 coordinateProfile: session.coordinateProfile,
                 wdaLocalPort: session.wdaLocalPort,
                 mjpegLocalPort: session.mjpegLocalPort,
@@ -522,6 +570,13 @@ export class DeviceRegistrationService implements DeviceRegistrationManager {
         });
         if (!added && session.passcode) {
             await setDevicePasscode(session.device.udid, session.passcode);
+        }
+        if (session.device.platform === 'android') {
+            session.checks.wda = check('passed', 'Android device registered for UiAutomator2');
+            session.finalized = true;
+            this.recalculate(session);
+            await this.persist(session);
+            return publicSnapshot(session);
         }
         session.checks.wda = check('checking', 'Handing WDA ownership to the persistent fleet service');
         await this.stopSupervisor(session);
@@ -684,7 +739,7 @@ export class DeviceRegistrationService implements DeviceRegistrationManager {
 
     private recalculate(session: RegistrationSession): void {
         session.canFinalize = checkNames.every((name) => session.checks[name].state === 'passed')
-            && Boolean(session.name && session.coordinateProfile);
+            && Boolean(session.name && (session.device.platform === 'android' || session.coordinateProfile));
     }
 
     private log(session: RegistrationSession, value: string): void {

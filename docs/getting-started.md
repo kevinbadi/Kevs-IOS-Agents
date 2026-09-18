@@ -1,6 +1,6 @@
 # Getting started
 
-Phone Farm iOS drives physical iPhones from a local dashboard: guided device
+Phone Farm drives physical iOS devices from a local dashboard: guided device
 registration, a live screen with remote tap/swipe, and a PostgreSQL‑backed
 scheduler that runs versioned automation tasks (TikTok and Instagram plugins
 ship built‑in).
@@ -14,6 +14,36 @@ ship built‑in).
 | PostgreSQL 14+ | `docker compose up -d postgres` is provided, or bring your own and set `DATABASE_URL`. |
 | A physical iPhone | Developer‑enabled, trusted, connected by USB. |
 | An Apple Developer team | For signing WebDriverAgent. |
+
+For Android devices, install Android Studio or the Android command-line tools,
+Java, and `adb`, then enable USB debugging on the device. Android does not use
+Xcode, `usbmuxd`, or WebDriverAgent.
+
+Install the Appium Android driver and verify the device with:
+
+```sh
+npm run appium:install-android-driver
+npm run android:devices
+```
+
+Android registration uses the same `devices.json` file. Add `"platform":
+"android"` to an entry; entries without this field remain iOS for backwards
+compatibility. Android automation uses Appium's UiAutomator2 driver.
+
+To generate virtual Android phones, install the Android SDK command-line tools,
+the emulator package, and at least one system image. Then the dashboard can use
+these endpoints:
+
+```sh
+curl http://127.0.0.1:3000/api/android/emulators
+curl -X POST http://127.0.0.1:3000/api/android/emulators \
+  -H 'content-type: application/json' \
+  -d '{"name":"pixel-api","systemImage":"system-images;android-35;google_apis;x86_64","device":"pixel_2"}'
+curl -X DELETE http://127.0.0.1:3000/api/android/emulators/pixel-api
+```
+
+The create operation runs `avdmanager`, starts `emulator`, waits for
+`sys.boot_completed`, and returns the emulator UDID for Appium.
 
 ## 1. Xcode & first device pairing
 

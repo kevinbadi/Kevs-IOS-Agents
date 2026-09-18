@@ -101,11 +101,15 @@ const swipeAxisX = Math.round(coordinates.screenSize.width * 0.32);
 const wdaUrl = process.env.WDA_URL;
 const tiktokBundleId = process.env.TIKTOK_BUNDLE_ID ?? 'com.zhiliaoapp.musically';
 
+const registeredPlatform = registeredDevice?.platform ?? 'ios';
+
 const capabilities: WebdriverIO.Capabilities & Record<string, unknown> = {
-    platformName: 'iOS',
-    'appium:automationName': 'XCUITest',
+    platformName: registeredPlatform === 'android' ? 'Android' : 'iOS',
+    'appium:automationName': registeredPlatform === 'android' ? 'UiAutomator2' : 'XCUITest',
     'appium:udid': udid,
-    'appium:bundleId': tiktokBundleId,
+    ...(registeredPlatform === 'android'
+        ? { 'appium:appPackage': tiktokBundleId }
+        : { 'appium:bundleId': tiktokBundleId }),
     'appium:noReset': true,
     'appium:forceAppLaunch': true,
     'appium:shouldTerminateApp': true,
@@ -117,6 +121,10 @@ const capabilities: WebdriverIO.Capabilities & Record<string, unknown> = {
     'appium:waitForIdleTimeout': 0,
     'appium:showXcodeLog': process.env.SHOW_XCODE_LOG === 'true',
 };
+
+if (registeredPlatform === 'android') {
+    delete capabilities['appium:waitForIdleTimeout'];
+}
 
 if (wdaUrl) {
     capabilities['appium:webDriverAgentUrl'] = wdaUrl;
