@@ -54,6 +54,22 @@ export interface VisionModel {
 
 export class VlmError extends Error {}
 
+/**
+ * The model answered, but the reply could not be turned into an action (no
+ * tool call, unknown tool, `x` that isn't a number, unparseable JSON…). The
+ * runner treats this as a wasted turn and asks again rather than failing the
+ * run; tokens are still billed, so usage rides along.
+ */
+export class MalformedReplyError extends VlmError {
+    constructor(
+        message: string,
+        readonly reasoning: string = '',
+        readonly usage: VlmUsage = { inputTokens: 0, outputTokens: 0 },
+    ) {
+        super(message);
+    }
+}
+
 export function systemPrompt(screen: { width: number; height: number }): string {
     return [
         'You are an autonomous agent operating a real iPhone through WebDriverAgent.',
@@ -207,21 +223,25 @@ export class AnthropicVisionModel implements VisionModel {
         }
         const blocks = payload.content ?? [];
         const prose = blocks.filter((block) => block.type === 'text').map((block) => block.text.trim()).filter(Boolean).join('\n');
+        const usage: VlmUsage = {
+            inputTokens: payload.usage?.input_tokens ?? 0,
+            outputTokens: payload.usage?.output_tokens ?? 0,
+        };
         const call = blocks.find((block) => block.type === 'tool_use');
         if (!call || call.type !== 'tool_use') {
-            throw new VlmError(`Model did not return an action${prose ? `: ${prose.slice(0, 200)}` : ''}`);
+            throw new MalformedReplyError(`Model did not return an action${prose ? `: ${prose.slice(0, 200)}` : ''}`, prose, usage);
         }
         const input = call.input ?? {};
         const inline = typeof input.reasoning === 'string' ? input.reasoning.trim() : '';
-        return {
-            action: parseAgentAction(call.name, input),
-            reasoning: [prose, inline].filter(Boolean).join('\n'),
-            usage: {
-                inputTokens: payload.usage?.input_tokens ?? 0,
-                outputTokens: payload.usage?.output_tokens ?? 0,
-            },
-            raw: payload,
-        };
+        const reasoning = [prose, inline].filter(Boolean).join('\n');
+        let action: AgentAction;
+        try {
+            action = parseAgentAction(call.name, input);
+        } catch (error) {
+            const detail = error instanceof Error ? error.message : String(error);
+            throw new MalformedReplyError(`Model returned an invalid ${call.name}: ${detail} (got ${JSON.stringify(input).slice(0, 160)})`, reasoning, usage);
+        }
+        return { action, reasoning, usage, raw: payload };
     }
 }
 

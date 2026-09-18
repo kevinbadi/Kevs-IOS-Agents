@@ -6,6 +6,7 @@ type AgentAction =
     | { type: 'tap'; x: number; y: number; target?: string }
     | { type: 'long_press'; x: number; y: number; durationMs: number; target?: string }
     | { type: 'swipe'; startX: number; startY: number; endX: number; endY: number; durationMs: number }
+    | { type: 'scroll'; direction: 'up' | 'down' | 'left' | 'right' }
     | { type: 'type_text'; text: string }
     | { type: 'press_home' }
     | { type: 'open_app'; bundleId: string }
@@ -99,6 +100,8 @@ const liveMeta = $<HTMLElement>('#agent-live-meta');
 const liveStatus = $<HTMLElement>('#agent-live-status');
 const liveNotes = $<HTMLElement>('#agent-live-notes');
 const stopButton = $<HTMLButtonElement>('#agent-stop');
+const voiceButton = $<HTMLButtonElement>('#agent-voice');
+const voiceLabel = $<HTMLElement>('#agent-voice-label');
 const screenImg = $<HTMLImageElement>('#agent-screen-img');
 const screenEmpty = $<HTMLElement>('#agent-screen-empty');
 const screenEmptyText = $<HTMLElement>('#agent-screen-empty-text');
@@ -131,6 +134,130 @@ let elapsedTimer: number | null = null;
 let currentRun: AgentRun | null = null;
 let configured = false;
 let devices: DeviceSummary[] = [];
+
+/**
+ * Voice: narrate the agent's reasoning with the browser's own speech engine
+ * (Web Speech API — on-device, no API key, works for cloud and local runs).
+ * Only live runs are narrated, never runs opened from history, and the queue is
+ * kept to the newest step so the voice never lags behind a fast cloud model.
+ */
+const VOICE_PREF_KEY = 'agent-voice';
+const speechSupported = 'speechSynthesis' in window && 'SpeechSynthesisUtterance' in window;
+let voiceOn = speechSupported && localStorage.getItem(VOICE_PREF_KEY) === 'on';
+let narratedRunId: string | null = null;
+const narratedSteps = new Set<number>();
+let narratedOutcome = false;
+
+function renderVoiceButton(): void {
+    voiceButton.hidden = !speechSupported;
+    voiceButton.setAttribute('aria-pressed', String(voiceOn));
+    voiceButton.classList.toggle('is-on', voiceOn);
+    voiceLabel.textContent = voiceOn ? 'Voice on' : 'Voice off';
+}
+
+function pickVoice(): SpeechSynthesisVoice | null {
+    const voices = speechSynthesis.getVoices();
+    if (!voices.length) return null;
+    const preferred = ['Samantha', 'Ava', 'Allison', 'Zoe', 'Google US English', 'Karen', 'Daniel'];
+    for (const name of preferred) {
+        const match = voices.find((voice) => voice.name === name || voice.name.startsWith(`${name} `));
+        if (match) return match;
+    }
+    return voices.find((voice) => voice.lang.startsWith('en') && voice.default)
+        ?? voices.find((voice) => voice.lang.startsWith('en'))
+        ?? voices[0];
+}
+
+function speak(text: string): void {
+    if (!voiceOn || !speechSupported) return;
+    const trimmed = text.replace(/\s+/g, ' ').trim();
+    if (!trimmed) return;
+    // Keep the narration current: if we're already behind, drop the backlog.
+    if (speechSynthesis.pending) speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(trimmed);
+    const voice = pickVoice();
+    if (voice) utterance.voice = voice;
+    utterance.rate = 1.08;
+    utterance.pitch = 1;
+    speechSynthesis.speak(utterance);
+}
+
+function stopSpeaking(): void {
+    if (speechSupported) speechSynthesis.cancel();
+}
+
+/** A short, coordinate-free spoken version of the action the agent chose. */
+function speakableAction(step: AgentStep): string {
+    const action = step.action;
+    if (!action) return step.result === 'error' && step.error ? `That didn't work: ${step.error}` : '';
+    let phrase: string;
+    switch (action.type) {
+        case 'tap': phrase = action.target ? `Tapping ${action.target}.` : 'Tapping the screen.'; break;
+        case 'long_press': phrase = action.target ? `Long-pressing ${action.target}.` : 'Long-pressing.'; break;
+        case 'swipe': phrase = 'Swiping.'; break;
+        case 'scroll': phrase = `Scrolling ${action.direction}.`; break;
+        case 'type_text': phrase = `Typing: ${action.text}`; break;
+        case 'press_home': phrase = 'Going to the home screen.'; break;
+        case 'open_app': phrase = 'Opening the app.'; break;
+        case 'wait': phrase = `Waiting ${action.seconds} second${action.seconds === 1 ? '' : 's'}.`; break;
+        case 'done': return '';
+        case 'fail': return '';
+    }
+    if (step.result === 'error' && step.error) phrase += ` But that was blocked: ${step.error}`;
+    return phrase;
+}
+
+function narrateRun(run: AgentRun, wasRunning: boolean): void {
+    if (!voiceOn) return;
+    if (narratedRunId !== run.id) {
+        narratedRunId = run.id;
+        narratedSteps.clear();
+        narratedOutcome = false;
+        // Opening an old run from history: don't read its whole transcript back.
+        if (run.status !== 'running') {
+            for (const step of run.steps) narratedSteps.add(step.index);
+            narratedOutcome = true;
+            return;
+        }
+    }
+    const live = run.status === 'running' || wasRunning;
+    if (!live) return;
+    for (const step of run.steps) {
+        if (narratedSteps.has(step.index)) continue;
+        // Wait until the model has answered for this step so we read the full thought.
+        if (step.result === 'pending' && !step.reasoning) continue;
+        narratedSteps.add(step.index);
+        const reasoning = step.reasoning || (step.action ? '' : step.actionLabel);
+        speak(`Step ${step.index + 1}. ${reasoning} ${speakableAction(step)}`);
+    }
+    if (run.status !== 'running' && !narratedOutcome) {
+        narratedOutcome = true;
+        const closing = run.status === 'succeeded'
+            ? `Goal reached. ${run.summary ?? ''}`
+            : run.status === 'stopped'
+                ? 'Run stopped.'
+                : `Run failed. ${run.error ?? ''}`;
+        speak(closing);
+    }
+}
+
+function toggleVoice(): void {
+    voiceOn = !voiceOn;
+    localStorage.setItem(VOICE_PREF_KEY, voiceOn ? 'on' : 'off');
+    renderVoiceButton();
+    if (voiceOn) {
+        // Speaking from the click handler also unlocks audio in browsers that gate it on a gesture.
+        speak(FLAVOR === 'local' ? 'Voice on. I will read the local agent\'s reasoning as it runs.' : 'Voice on. I will read the agent\'s reasoning as it runs.');
+        if (currentRun) {
+            narratedRunId = currentRun.id;
+            narratedSteps.clear();
+            for (const step of currentRun.steps) narratedSteps.add(step.index);
+            narratedOutcome = currentRun.status !== 'running';
+        }
+    } else {
+        stopSpeaking();
+    }
+}
 
 /**
  * The screen frame shows the phone's live MJPEG stream by default (same feed as
@@ -284,7 +411,7 @@ function statusLabel(status: RunStatus): string {
 function actionIcon(action: AgentAction | null): string {
     if (!action) return '…';
     return {
-        tap: '⊙', long_press: '◉', swipe: '⇅', type_text: '⌨', press_home: '⌂',
+        tap: '⊙', long_press: '◉', swipe: '⇅', scroll: '⇣', type_text: '⌨', press_home: '⌂',
         open_app: '▣', wait: '◷', done: '✓', fail: '✕',
     }[action.type];
 }
@@ -484,7 +611,9 @@ function renderLog(run: AgentRun): void {
 }
 
 function renderRun(run: AgentRun): void {
+    const wasRunning = currentRun?.id === run.id && currentRun.status === 'running';
     currentRun = run;
+    narrateRun(run, wasRunning);
     livePanel.dataset.status = run.status;
     liveGoal.textContent = run.goal;
     liveMeta.textContent = `${run.deviceName} · ${run.model} · started ${new Date(run.createdAt).toLocaleTimeString()}`;
@@ -546,6 +675,7 @@ async function pollRun(): Promise<void> {
 
 function selectRun(id: string): void {
     stopPolling();
+    stopSpeaking();
     currentRunId = id;
     currentRun = null;
     pinnedCapture = null;
@@ -625,6 +755,9 @@ timeline.addEventListener('click', (event) => {
 });
 
 refreshButton.addEventListener('click', () => { void loadHistory(); void loadDevices(); });
+voiceButton.addEventListener('click', toggleVoice);
+renderVoiceButton();
+if (speechSupported) speechSynthesis.addEventListener('voiceschanged', () => { /* warm the voice list so pickVoice() has options on first use */ speechSynthesis.getVoices(); });
 modeLiveButton.addEventListener('click', () => setScreenMode('live'));
 modeCaptureButton.addEventListener('click', () => setScreenMode('capture'));
 deviceSelect.addEventListener('change', () => {
@@ -642,6 +775,7 @@ elapsedTimer = window.setInterval(updateElapsed, 1_000);
 window.addEventListener('beforeunload', () => {
     stopPolling();
     stopLiveStream();
+    stopSpeaking();
     if (elapsedTimer !== null) window.clearInterval(elapsedTimer);
 });
 // Don't hold an MJPEG connection open for a hidden tab.

@@ -9,7 +9,7 @@
  */
 
 import { AGENT_TOOLS, SCROLL_DIRECTIONS, parseAgentAction, toolCallForAction, type AgentAction } from './actions.js';
-import { actionTally, systemPrompt, VlmError, type VisionModel, type VlmDecision, type VlmStepRequest } from './vlm.js';
+import { actionTally, MalformedReplyError, systemPrompt, VlmError, type VisionModel, type VlmDecision, type VlmStepRequest } from './vlm.js';
 
 export const DEFAULT_LOCAL_AGENT_MODEL = 'qwen3-vl:8b';
 export const DEFAULT_OLLAMA_URL = 'http://127.0.0.1:11434';
@@ -106,11 +106,11 @@ export function extractJsonObject(raw: string): Record<string, unknown> {
     } catch {
         const start = trimmed.indexOf('{');
         const end = trimmed.lastIndexOf('}');
-        if (start === -1 || end <= start) throw new VlmError(`Model reply was not JSON: ${trimmed.slice(0, 200)}`);
+        if (start === -1 || end <= start) throw new MalformedReplyError(`Model reply was not JSON: ${trimmed.slice(0, 200)}`);
         try {
             return JSON.parse(trimmed.slice(0, end + 1).slice(start)) as Record<string, unknown>;
         } catch {
-            throw new VlmError(`Model reply was not valid JSON: ${trimmed.slice(0, 200)}`);
+            throw new MalformedReplyError(`Model reply was not valid JSON: ${trimmed.slice(0, 200)}`);
         }
     }
 }
@@ -118,16 +118,18 @@ export function extractJsonObject(raw: string): Record<string, unknown> {
 export function decisionFromJson(payload: Record<string, unknown>): { action: AgentAction; reasoning: string } {
     const { reasoning, tool, ...args } = payload;
     const name = typeof tool === 'string' ? tool.trim() : '';
-    if (!TOOL_NAMES.includes(name)) throw new VlmError(`Model picked an unknown tool "${name}"`);
+    const thought = typeof reasoning === 'string' ? reasoning.trim() : '';
+    if (!TOOL_NAMES.includes(name)) throw new MalformedReplyError(`Model picked an unknown tool "${name}"`, thought);
     // Drop empty strings / nulls so optional fields fall back to defaults.
     const input = Object.fromEntries(Object.entries(args).filter(([, value]) => value !== null && value !== '' && value !== undefined));
     let action: AgentAction;
     try {
         action = parseAgentAction(name, input);
     } catch (error) {
-        throw new VlmError(`Model returned an invalid ${name}: ${error instanceof Error ? error.message : String(error)}`);
+        const detail = error instanceof Error ? error.message : String(error);
+        throw new MalformedReplyError(`Model returned an invalid ${name}: ${detail} (got ${JSON.stringify(input).slice(0, 160)})`, thought);
     }
-    return { action, reasoning: typeof reasoning === 'string' ? reasoning.trim() : '' };
+    return { action, reasoning: thought };
 }
 
 interface OllamaChatResponse {
@@ -222,17 +224,20 @@ export class OllamaVisionModel implements VisionModel {
         let content = payload.message?.content ?? '';
         const thinking = payload.message?.thinking ?? '';
         if (!content.trim() && /\{[\s\S]*"tool"[\s\S]*\}/.test(thinking)) content = thinking;
+        const usage = { inputTokens: payload.prompt_eval_count ?? 0, outputTokens: payload.eval_count ?? 0 };
         if (!content.trim()) {
-            throw new VlmError(thinking
+            throw new MalformedReplyError(thinking
                 ? 'Local model spent its whole reply thinking and returned no action'
-                : 'Local model returned an empty reply');
+                : 'Local model returned an empty reply', '', usage);
         }
-        const decision = decisionFromJson(extractJsonObject(content));
-        return {
-            ...decision,
-            usage: { inputTokens: payload.prompt_eval_count ?? 0, outputTokens: payload.eval_count ?? 0 },
-            raw: payload,
-        };
+        try {
+            const decision = decisionFromJson(extractJsonObject(content));
+            return { ...decision, usage, raw: payload };
+        } catch (error) {
+            // Attach the tokens this wasted turn cost so the run's tally stays honest.
+            if (error instanceof MalformedReplyError) throw new MalformedReplyError(error.message, error.reasoning, usage);
+            throw error;
+        }
     }
 }
 

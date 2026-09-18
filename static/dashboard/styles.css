@@ -2345,6 +2345,49 @@ dialog#calibrate-dialog { width: min(760px, calc(100% - 28px)); }
 .agent-live-goal { margin: 0 0 4px; font-size: clamp(18px, 2vw, 24px); line-height: 1.2; overflow-wrap: anywhere; }
 .agent-live-meta { margin: 0; color: var(--muted); font-size: 12px; }
 .agent-live-actions { display: flex; flex-shrink: 0; align-items: center; gap: 10px; }
+.agent-voice {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 32px;
+    padding: 0 12px;
+    border: 1px solid var(--border-strong);
+    border-radius: 999px;
+    background: transparent;
+    color: var(--muted);
+    font: inherit;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: background .15s ease, color .15s ease, border-color .15s ease;
+}
+.agent-voice:hover { color: var(--text, #fff); background: rgb(255 255 255 / 5%); }
+.agent-voice.is-on { color: var(--text, #fff); border-color: rgb(94 234 212 / 55%); background: rgb(94 234 212 / 10%); }
+.agent-voice-icon {
+    position: relative;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    border: 2px solid currentcolor;
+    opacity: .6;
+}
+.agent-voice-icon::after {
+    content: '';
+    position: absolute;
+    inset: 2px;
+    border-radius: 50%;
+    background: currentcolor;
+    transform: scale(0);
+    transition: transform .15s ease;
+}
+.agent-voice.is-on .agent-voice-icon { opacity: 1; color: #5eead4; }
+.agent-voice.is-on .agent-voice-icon::after { transform: scale(1); animation: agent-voice-pulse 1.4s ease-in-out infinite; }
+@keyframes agent-voice-pulse {
+    0%, 100% { transform: scale(.55); }
+    50% { transform: scale(1); }
+}
 .agent-status-pill {
     display: inline-flex;
     align-items: center;

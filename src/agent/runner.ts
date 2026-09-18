@@ -17,7 +17,7 @@ import path from 'node:path';
 import { describeAction, normalizeCoordinates, type AgentAction } from './actions.js';
 import { AgentDevice, type AgentRemote } from './device.js';
 import { appHintsFor } from './playbook.js';
-import type { VisionModel, VlmUsage } from './vlm.js';
+import { MalformedReplyError, VlmError, type VisionModel, type VlmUsage } from './vlm.js';
 
 export type AgentRunStatus = 'running' | 'succeeded' | 'failed' | 'stopped';
 
@@ -99,6 +99,8 @@ const PRICING: Record<string, { input: number; output: number }> = {
 };
 
 const REPEAT_TAP_RADIUS_PT = 12;
+/** Consecutive unusable replies (no tool call, `x` not a number…) before the run gives up on the model. */
+const MAX_MALFORMED_REPLIES = 3;
 
 /**
  * Tapping the exact spot you just tapped is almost always a toggle flapping
@@ -297,6 +299,8 @@ export class AgentRunner {
         let lastFingerprint: string | null = null;
         let lastActionLabel: string | null = null;
         let unchangedRepeats = 0;
+        let malformedReplies = 0;
+        let replyNudge: string | undefined;
         try {
             appendLog(run, 'Checking that the phone is unlocked');
             const unlock = await device.ensureUnlocked();
@@ -322,10 +326,12 @@ export class AgentRunner {
 
                 const unchanged = lastFingerprint !== null && observation.fingerprint === lastFingerprint;
                 unchangedRepeats = unchanged ? unchangedRepeats + 1 : 0;
-                const nudge = unchangedRepeats >= 2 && lastActionLabel
+                const unchangedNudge = unchangedRepeats >= 2 && lastActionLabel
                     ? `The screen has not changed after your last ${unchangedRepeats} actions (last: ${lastActionLabel}). Do something different.`
                     : undefined;
-                if (nudge) appendLog(run, `${stepNo} · Screen unchanged ${unchangedRepeats}× — nudging the model to try something else`);
+                if (unchangedNudge) appendLog(run, `${stepNo} · Screen unchanged ${unchangedRepeats}× — nudging the model to try something else`);
+                const nudge = [replyNudge, unchangedNudge].filter(Boolean).join(' ') || undefined;
+                replyNudge = undefined;
 
                 const step: AgentStep = {
                     index,
@@ -344,7 +350,7 @@ export class AgentRunner {
                 };
                 run.steps.push(step);
 
-                const decision = await model.decide({
+                const request = {
                     goal: run.goal,
                     stepIndex: index,
                     maxSteps: run.maxSteps,
@@ -362,7 +368,34 @@ export class AgentRunner {
                     locked: observation.locked,
                     nudge,
                     appHints: appHintsFor(observation.app),
-                });
+                };
+                let decision;
+                try {
+                    decision = await model.decide(request);
+                    malformedReplies = 0;
+                } catch (error) {
+                    if (!(error instanceof MalformedReplyError)) throw error;
+                    // The model answered but we couldn't act on it. Charge the turn, tell
+                    // the model exactly what was wrong, and let it try again.
+                    malformedReplies += 1;
+                    step.reasoning = error.reasoning;
+                    step.usage = error.usage;
+                    run.usage.inputTokens += error.usage.inputTokens;
+                    run.usage.outputTokens += error.usage.outputTokens;
+                    run.estimatedCostUsd = estimateCost(run.model, run.usage, this.flavor);
+                    step.result = 'error';
+                    step.error = error.message;
+                    step.actionLabel = 'unusable reply · retrying';
+                    step.durationMs = Date.now() - startedAt;
+                    if (error.reasoning) appendLog(run, `${stepNo} · Reason — ${error.reasoning}`);
+                    appendLog(run, `${stepNo} · Unusable reply ✕ ${error.message} — asking again (${malformedReplies}/${MAX_MALFORMED_REPLIES})`);
+                    await this.persist(run);
+                    if (malformedReplies >= MAX_MALFORMED_REPLIES) {
+                        throw new VlmError(`Model returned ${malformedReplies} unusable replies in a row — last: ${error.message}`);
+                    }
+                    replyNudge = `Your previous reply could not be executed: ${error.message}. Nothing happened on the phone. Reply with exactly one tool call and give every coordinate as a whole number in points (e.g. x: 128, y: 805).`;
+                    continue;
+                }
                 step.reasoning = decision.reasoning;
                 const normalized = normalizeCoordinates(decision.action, observation.screen, observation.imageSize);
                 decision.action = normalized.action;

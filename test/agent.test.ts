@@ -11,7 +11,7 @@ import { AgentDevice, annotateScreenshot, describeForegroundApp, scrollGesture, 
 import { appHintsFor, bundleIdFromLabel } from '../src/agent/playbook.js';
 import { compactHierarchy } from '../src/agent/hierarchy.js';
 import { AgentRunner, repeatedTapGuard, type AgentStep } from '../src/agent/runner.js';
-import { AnthropicVisionModel, actionTally, buildMessages, type PriorTurn, type VisionModel, type VlmDecision, type VlmStepRequest } from '../src/agent/vlm.js';
+import { AnthropicVisionModel, MalformedReplyError, actionTally, buildMessages, type PriorTurn, type VisionModel, type VlmDecision, type VlmStepRequest } from '../src/agent/vlm.js';
 import { OllamaVisionModel, buildLocalMessages, decisionFromJson, extractJsonObject } from '../src/agent/local-vlm.js';
 import { createApp } from '../src/api/app.js';
 import { defaultDashboardTheme } from '../src/dashboard-theme.js';
@@ -359,6 +359,59 @@ test('the runner refuses a repeat tap on the spot it just tapped and tells the m
     const taps = log.filter((entry) => entry.startsWith('perform:') && entry.includes('"tap"'));
     assert.equal(taps.length, 1, 'the second tap never reached the phone');
     assert.ok(finished.log.some((line) => /Blocked ✕/.test(line)));
+});
+
+test('a malformed tool call costs the model one turn instead of the run', async (context) => {
+    const dataDir = await mkdtemp(path.join(os.tmpdir(), 'agent-run-'));
+    context.after(() => rm(dataDir, { recursive: true, force: true }));
+
+    // The cloud adapter turns a tap with a non-numeric x into a MalformedReplyError that still carries usage.
+    const cloud = new AnthropicVisionModel({
+        apiKey: 'k',
+        fetchImpl: (async () => new Response(JSON.stringify({
+            content: [{ type: 'tool_use', id: 't', name: 'tap', input: { x: 'Games tab', y: 805 } }],
+            usage: { input_tokens: 4000, output_tokens: 60 },
+        }), { status: 200 })) as typeof fetch,
+    });
+    await assert.rejects(cloud.decide({
+        goal: 'x', stepIndex: 0, maxSteps: 1, screen: { width: 1, height: 1 }, screenshot: Buffer.alloc(0),
+        hierarchy: '', hierarchyTruncated: false, history: [], locked: false,
+    }), (error: unknown) => error instanceof MalformedReplyError && /invalid tap: x must be a number/.test(error.message) && error.usage.inputTokens === 4000);
+
+    const log: string[] = [];
+    const usage = { inputTokens: 10, outputTokens: 1 };
+    const model = scriptedModel([
+        () => { throw new MalformedReplyError('Model returned an invalid tap: x must be a number', 'tap the Games tab', { inputTokens: 100, outputTokens: 5 }); },
+        (request) => {
+            assert.match(request.nudge ?? '', /could not be executed: Model returned an invalid tap: x must be a number/);
+            assert.equal(request.history.length, 0, 'the unusable turn is not replayed as an action');
+            return { action: { type: 'tap', x: 128, y: 805, target: 'Games tab' }, reasoning: 'try again with numbers', usage };
+        },
+        (request) => {
+            assert.equal(request.nudge, undefined, 'the correction is only sent once');
+            return { action: { type: 'done', summary: 'downloaded' }, reasoning: '', usage };
+        },
+    ]);
+    const runner = new AgentRunner({ remote: fakeRemote(log), model, dataDir, settleMs: 0 });
+    const run = await runner.start({ deviceUdid: 'udid-malformed', goal: 'get a free game', maxSteps: 6 });
+    const finished = await finishedRun(runner, run.id);
+    assert.equal(finished.status, 'succeeded');
+    assert.equal(finished.steps.length, 3);
+    assert.equal(finished.steps[0]?.result, 'error');
+    assert.equal(finished.steps[0]?.actionLabel, 'unusable reply · retrying');
+    assert.equal(finished.steps[0]?.reasoning, 'tap the Games tab');
+    assert.equal(finished.usage.inputTokens, 120, 'the wasted turn is still billed');
+    assert.ok(finished.log.some((line) => /Unusable reply ✕ .*asking again \(1\/3\)/.test(line)));
+    assert.equal(log.filter((entry) => entry.startsWith('perform:')).length, 1);
+
+    // Three unusable replies in a row is a real failure.
+    const stubborn = scriptedModel([() => { throw new MalformedReplyError('Model did not return an action'); }]);
+    const runner2 = new AgentRunner({ remote: fakeRemote([]), model: stubborn, dataDir: path.join(dataDir, 'b'), settleMs: 0 });
+    const run2 = await runner2.start({ deviceUdid: 'udid-malformed-2', goal: 'x', maxSteps: 6 });
+    const finished2 = await finishedRun(runner2, run2.id);
+    assert.equal(finished2.status, 'failed');
+    assert.equal(finished2.steps.length, 3);
+    assert.match(finished2.error ?? '', /3 unusable replies in a row/);
 });
 
 test('local AgentRunner reports zero cost and blocks a phone the cloud runner is using', async (context) => {

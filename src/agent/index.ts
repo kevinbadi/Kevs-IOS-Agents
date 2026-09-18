@@ -15,6 +15,6 @@ export {
     localSystemPrompt, localVisionModelFromEnv, type OllamaHealth,
 } from './local-vlm.js';
 export {
-    AnthropicVisionModel, DEFAULT_AGENT_MODEL, VlmError, actionTally, buildMessages, systemPrompt, visionModelFromEnv,
+    AnthropicVisionModel, DEFAULT_AGENT_MODEL, MalformedReplyError, VlmError, actionTally, buildMessages, systemPrompt, visionModelFromEnv,
     type PriorTurn, type VisionModel, type VlmDecision, type VlmStepRequest, type VlmUsage,
 } from './vlm.js';
