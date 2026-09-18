@@ -23,6 +23,7 @@ import type {
 } from '../devices/registration.js';
 import { type RemoteAction } from '../devices/wda-remote.js';
 import { requestWdaService } from '../devices/wda-service-client.js';
+import { createAndroidEmulator, getAndroidEmulatorScreenshot, listAndroidEmulators, stopAndroidEmulator } from '../devices/android/emulator-manager.js';
 import type { DeviceConnectionStatus } from '../devices/connection-manager.js';
 import type { AuthProvider, PluginNavLink } from '../plugin.js';
 import type { PluginRegistry } from '../registry.js';
@@ -162,6 +163,14 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
         const type = reply.getHeader('content-type');
         if (typeof type === 'string' && type.includes('text/html') && !reply.hasHeader('cache-control')) {
             reply.header('cache-control', 'no-cache');
+        }
+    });
+    app.get<{ Params: { name: string } }>('/api/android/emulators/:name/screenshot', async (request, reply) => {
+        try {
+            return reply.header('cache-control', 'no-store').type('image/png')
+                .send(await getAndroidEmulatorScreenshot(request.params.name));
+        } catch {
+            return reply.code(503).header('cache-control', 'no-store').send();
         }
     });
 
@@ -309,6 +318,25 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
     })));
     app.get('/api/devices', async () => registeredWithStatus());
     app.get('/api/devices/discovered', async () => discoverConnectedDevices());
+    app.get('/api/android/emulators', async () => listAndroidEmulators());
+    app.post<{ Body: { name?: string; systemImage?: string; device?: string; port?: number } }>(
+        '/api/android/emulators', async (request, reply) => {
+            if (!request.body?.name) return reply.code(400).send({ error: 'Emulator name is required' });
+            try {
+                return reply.code(201).send(await createAndroidEmulator({ ...request.body, name: request.body.name }));
+            } catch (error) {
+                return reply.code(400).send({ error: error instanceof Error ? error.message : String(error) });
+            }
+        },
+    );
+    app.delete<{ Params: { name: string } }>('/api/android/emulators/:name', async (request, reply) => {
+        try {
+            await stopAndroidEmulator(request.params.name);
+            return reply.code(204).send();
+        } catch (error) {
+            return reply.code(404).send({ error: error instanceof Error ? error.message : String(error) });
+        }
+    });
     app.get('/api/device-registrations/candidates', async (_request, reply) => {
         if (!options.registrations) return reply.code(503).send({ error: 'Device registration is not configured' });
         return { devices: await options.registrations.candidates() };

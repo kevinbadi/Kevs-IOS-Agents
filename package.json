@@ -27,8 +27,11 @@
     "./worker": "./src/scheduler/worker.ts"
   },
   "scripts": {
-    "appium": "APPIUM_HOME=.appium2 node node_modules/appium/index.js --address 127.0.0.1 --base-path / --port 4725 --log-level info",
+    "appium": "ANDROID_HOME=${ANDROID_HOME:-$PWD/.android-sdk} ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-$PWD/.android-sdk} PATH=$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$ANDROID_HOME/cmdline-tools/latest/bin:$PATH APPIUM_HOME=.appium2 node node_modules/appium/index.js --address 127.0.0.1 --base-path / --port 4725 --log-level info",
     "appium:install-driver": "APPIUM_HOME=.appium2 appium driver install xcuitest@7.26.3",
+    "appium:install-android-driver": "APPIUM_HOME=.appium2 appium driver install uiautomator2@4.0.0",
+    "android:devices": "adb devices",
+    "android:emulator:list": "node --import tsx -e \"import('./src/devices/android/emulator-manager.ts').then(async m => console.log(JSON.stringify(await m.listAndroidEmulators(), null, 2)))\"",
     "wda:prepare": "node --env-file-if-exists=.env --env-file-if-exists=.env.devices --import tsx src/devices/wda/prepare.ts",
     "wda:service": "node --env-file-if-exists=.env --env-file-if-exists=.env.devices --import tsx src/devices/wda-service.ts",
     "db:up": "docker compose up -d --wait postgres",
@@ -36,7 +39,7 @@
     "db:migrate": "node --env-file-if-exists=.env --import tsx src/database/migrate.ts",
     "db:setup": "node --env-file-if-exists=.env --import tsx src/database/setup.ts",
     "worker": "node --env-file-if-exists=.env --env-file-if-exists=.env.devices --import tsx src/scheduler/worker.ts",
-    "web": "node --env-file-if-exists=.env --env-file-if-exists=.env.devices --import tsx src/api/server.ts",
+    "web": "ANDROID_HOME=${ANDROID_HOME:-$PWD/.android-sdk} ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-$PWD/.android-sdk} PATH=$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$ANDROID_HOME/cmdline-tools/latest/bin:$PATH node --env-file-if-exists=.env --env-file-if-exists=.env.devices --import tsx src/api/server.ts",
     "instagram:leads:import": "node --env-file-if-exists=.env --import tsx src/instagram/leads-import.ts",
     "hinge:shadow": "node --env-file-if-exists=.env --env-file-if-exists=.env.devices --import tsx src/hinge/shadow.ts",
     "linkedin:tour": "node --env-file-if-exists=.env --env-file-if-exists=.env.devices --import tsx src/linkedin/tour.ts",

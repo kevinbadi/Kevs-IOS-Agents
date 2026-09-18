@@ -16,4 +16,7 @@ test('deviceWaitProblem names the first missing dependency', () => {
     assert.equal(deviceWaitProblem({
         deviceFound: true, wdaReady: true, appiumReady: true, wdaPort: 8101, appiumPort: 4725,
     }), undefined);
+    assert.equal(deviceWaitProblem({
+        platform: 'android', deviceFound: true, wdaReady: false, appiumReady: true, wdaPort: 8101, appiumPort: 4725,
+    }), undefined);
 });
