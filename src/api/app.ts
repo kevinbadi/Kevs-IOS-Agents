@@ -35,7 +35,10 @@ import { AgentRunner } from '../agent/runner.js';
 import { registerAgentRoutes } from '../agent/routes.js';
 import { visionModelFromEnv } from '../agent/vlm.js';
 import { OllamaVisionModel, localVisionModelFromEnv } from '../agent/local-vlm.js';
-import { decisionsConfigFromEnv, escalationRateByWeek } from '../decisions/index.js';
+import {
+    DrizzleDecisionSink, createDecisions, decisionsConfigFromEnv, escalationRateByWeek, listRecentDecisions, type ScreenCatalog,
+} from '../decisions/index.js';
+import { OPEN_APP_SCREENS } from '../example-plugin.js';
 
 export interface CreateAppOptions {
     plugins: PluginRegistry;
@@ -63,6 +66,7 @@ interface LoadedDashboardTheme {
     resultsHtml: string;
     agentHtml: string;
     agentLocalHtml: string;
+    decisionsHtml: string;
     devicesDemoHtml: string;
     styles: string;
     deviceScript: string;
@@ -70,6 +74,7 @@ interface LoadedDashboardTheme {
     automationsScript: string;
     resultsScript: string;
     agentScript: string;
+    decisionsScript: string;
     registerDeviceHtml: string;
     registerDeviceScript: string;
     htmx: string;
@@ -155,7 +160,7 @@ function page(title: string, body: string, logoutPath?: string, navLinks: readon
     return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${escapeHtml(title)}</title><style>
 :root{color-scheme:dark}body{font:15px Outfit,system-ui,sans-serif;margin:0;background:#000;color:#f7f7f8}nav{display:flex;flex-wrap:wrap;gap:14px;align-items:center;padding:14px 24px;background:#0c0c0e;border-bottom:1px solid rgb(255 255 255 / 10%)}nav a{color:#f7f7f8;text-decoration:none;font-weight:650}main{max-width:1100px;margin:24px auto;padding:0 20px}.card{background:#0c0c0e;border:1px solid rgb(255 255 255 / 10%);border-radius:14px;padding:18px;margin:14px 0}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:9px;border-bottom:1px solid rgb(255 255 255 / 8%)}code{font-size:12px}.muted{color:#8a8a93}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px}button,.button{background:linear-gradient(105deg,#ff4b2b,#ff416c);color:white;border:0;border-radius:999px;padding:8px 14px;text-decoration:none;cursor:pointer;font-weight:700}input,select,textarea{padding:8px;border:1px solid rgb(255 255 255 / 14%);border-radius:10px;background:#070708;color:#f7f7f8}</style></head>
-<body><nav><a href="/">Devices</a><a href="/automations">Automations</a><a href="/results">Results</a><a href="/agent">Agent (Cloud)</a><a href="/agent-local">Agent (Local)</a><a href="/tasks">Tasks</a><a href="/docs">API</a>${extra}${logout}</nav><main>${body}</main><footer style="max-width:1100px;margin:24px auto;padding:16px 20px;color:#5c5c66;font-size:12px">${FOOTER_HTML}</footer></body></html>`;
+<body><nav><a href="/">Devices</a><a href="/automations">Automations</a><a href="/results">Results</a><a href="/agent">Agent (Cloud)</a><a href="/agent-local">Agent (Local)</a><a href="/decisions">Jev</a><a href="/tasks">Tasks</a><a href="/docs">API</a>${extra}${logout}</nav><main>${body}</main><footer style="max-width:1100px;margin:24px auto;padding:16px 20px;color:#5c5c66;font-size:12px">${FOOTER_HTML}</footer></body></html>`;
 }
 
 async function registeredWithStatus() {
@@ -236,7 +241,7 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
     if (options.dashboardTheme) {
         const root = options.dashboardTheme.rootDirectory;
         const require = createRequire(import.meta.url);
-        const [indexHtml, deviceHtml, tasksHtml, automationsHtml, resultsHtml, agentHtml, agentLocalHtml, registerDeviceHtml, devicesDemoHtml, styles, deviceScript, tasksScript, automationsScript, resultsScript, agentScript, registerDeviceScript, htmx] = await Promise.all([
+        const [indexHtml, deviceHtml, tasksHtml, automationsHtml, resultsHtml, agentHtml, agentLocalHtml, decisionsHtml, registerDeviceHtml, devicesDemoHtml, styles, deviceScript, tasksScript, automationsScript, resultsScript, agentScript, decisionsScript, registerDeviceScript, htmx] = await Promise.all([
             readFile(path.join(root, 'templates/index.html'), 'utf8'),
             readFile(path.join(root, 'templates/device.html'), 'utf8'),
             readFile(path.join(root, 'templates/tasks.html'), 'utf8'),
@@ -244,6 +249,7 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
             readFile(path.join(root, 'templates/results.html'), 'utf8'),
             readFile(path.join(root, 'templates/agent.html'), 'utf8'),
             readFile(path.join(root, 'templates/agent-local.html'), 'utf8'),
+            readFile(path.join(root, 'templates/decisions.html'), 'utf8'),
             readFile(path.join(root, 'templates/register-device.html'), 'utf8'),
             readFile(path.join(root, 'templates/devices-demo.html'), 'utf8'),
             readFile(path.join(root, 'styles.css'), 'utf8'),
@@ -252,6 +258,7 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
             readFile(path.join(root, 'assets/automations.js'), 'utf8'),
             readFile(path.join(root, 'assets/results.js'), 'utf8'),
             readFile(path.join(root, 'assets/agent.js'), 'utf8'),
+            readFile(path.join(root, 'assets/decisions.js'), 'utf8'),
             readFile(path.join(root, 'assets/register-device.js'), 'utf8'),
             readFile(require.resolve('htmx.org/dist/htmx.min.js'), 'utf8'),
         ]);
@@ -262,6 +269,7 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
             'tasks.js': assetHash(tasksScript), 'automations.js': assetHash(automationsScript),
             'results.js': assetHash(resultsScript),
             'agent.js': assetHash(agentScript),
+            'decisions.js': assetHash(decisionsScript),
             'register-device.js': assetHash(registerDeviceScript),
             'htmx.min.js': assetHash(htmx),
         };
@@ -277,9 +285,10 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
             resultsHtml: finalize(resultsHtml),
             agentHtml: finalize(agentHtml),
             agentLocalHtml: finalize(agentLocalHtml),
+            decisionsHtml: finalize(decisionsHtml),
             registerDeviceHtml: finalize(registerDeviceHtml),
             devicesDemoHtml: finalize(devicesDemoHtml),
-            styles, deviceScript, tasksScript, automationsScript, resultsScript, agentScript, registerDeviceScript, htmx,
+            styles, deviceScript, tasksScript, automationsScript, resultsScript, agentScript, decisionsScript, registerDeviceScript, htmx,
         };
     }
 
@@ -378,6 +387,48 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
             fitThreshold: config.fitThreshold,
             totals: { ...totals, rate: totals.decisions ? totals.escalated / totals.decisions : 0 },
             byWeek,
+        };
+    });
+    // Newest decisions with the element list they were made from — the /decisions
+    // page draws these over the live phone screen.
+    app.get<{ Querystring: { deviceUdid?: string; limit?: string; after?: string } }>('/api/decisions/recent', async (request, reply) => {
+        const connection = options.scheduler.connection;
+        if (!connection) return reply.code(503).send({ error: 'Decision telemetry is not available without a database' });
+        const after = request.query.after ? new Date(request.query.after) : undefined;
+        return {
+            decisions: await listRecentDecisions(connection, {
+                deviceUdid: request.query.deviceUdid?.trim() || undefined,
+                limit: Number(request.query.limit) || 30,
+                after: after && !Number.isNaN(after.getTime()) ? after : undefined,
+            }),
+        };
+    });
+    // Ask Jev about whatever is on a phone's screen right now, without tapping
+    // anything. Recorded like any other decision (source "dashboard/probe") so
+    // the /decisions page draws it; useful for tuning goals and screen catalogs.
+    app.post<{ Body: { deviceUdid?: string; goal?: string; screens?: ScreenCatalog; context?: string } }>('/api/decisions/probe', async (request, reply) => {
+        const config = decisionsConfigFromEnv();
+        if (!config.apiKey) return reply.code(503).send({ error: 'Decisions are unavailable (TYPESAFE_API_KEY unset)' });
+        const udid = request.body?.deviceUdid?.trim();
+        const goal = request.body?.goal?.trim();
+        if (!udid) return reply.code(400).send({ error: 'deviceUdid is required' });
+        const screens = request.body?.screens && Object.keys(request.body.screens).length ? request.body.screens : OPEN_APP_SCREENS;
+        const connection = options.scheduler.connection;
+        const decisions = createDecisions(
+            { deviceUdid: udid, source: 'dashboard/probe' },
+            { sink: connection ? new DrizzleDecisionSink(connection) : null },
+        );
+        const control = await remote.control(udid);
+        const report = await control.getIndexedElements(udid);
+        const verdict = goal
+            ? await decisions.chooseElement(report.elements, goal)
+            : await decisions.decideScreen(report.elements, screens, request.body?.context?.trim() || undefined);
+        return {
+            kind: goal ? 'element' : 'screen',
+            verdict,
+            elements: report.elements.length,
+            tokenEstimate: report.tokenEstimate,
+            screen: (await control.getScreenInfo(udid)).screenSize,
         };
     });
     app.get('/api/devices', async () => registeredWithStatus());
@@ -767,6 +818,7 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
         app.get('/assets/register-device.js', asset('text/javascript', theme.registerDeviceScript));
         app.get('/assets/results.js', asset('text/javascript', theme.resultsScript));
         app.get('/assets/agent.js', asset('text/javascript', theme.agentScript));
+        app.get('/assets/decisions.js', asset('text/javascript', theme.decisionsScript));
         app.get('/assets/htmx.min.js', asset('text/javascript', theme.htmx));
         app.get('/api/fragments/devices', async (_request, reply) => {
             const devices = await registeredWithStatus();
@@ -890,6 +942,9 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
     ));
     app.get('/agent-local', async (_request, reply) => reply.type('text/html').send(
         themed?.agentLocalHtml ?? renderPage('Agent (Local)', '<h1>Agent (Local)</h1><p>The same agent loop driven by a vision model running on this Mac through Ollama. Enable the dashboard theme for the live view, or use <code>POST /api/agent-local/runs</code>.</p>'),
+    ));
+    app.get('/decisions', async (_request, reply) => reply.type('text/html').send(
+        themed?.decisionsHtml ?? renderPage('Jev', '<h1>Jev</h1><p>Semantic decisions drawn over the live phone screen. Enable the dashboard theme for the live view, or read <code>GET /api/decisions/recent</code> and <code>GET /api/decisions/metrics</code>.</p>'),
     ));
     if (agentRunner) registerAgentRoutes(app, agentRunner, { prefix: '/api/agent' });
     if (localAgentRunner) {

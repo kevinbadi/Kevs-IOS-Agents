@@ -5,8 +5,8 @@ export {
 } from './config.js';
 export { JevClient, JevError, JevTimeoutError, type JevClientOptions } from './jev-client.js';
 export {
-    DrizzleDecisionSink, MemoryDecisionSink, decisionSink, escalationRateByWeek, setDecisionSink,
-    type DecisionRecord, type DecisionSink, type EscalationBucket,
+    DrizzleDecisionSink, MemoryDecisionSink, decisionSink, escalationRateByWeek, listRecentDecisions, setDecisionSink,
+    type DecisionRecord, type DecisionSink, type EscalationBucket, type RecentDecision,
 } from './telemetry.js';
 export type {
     Answers, DecisionBackend, DecisionScope, Decisions, ElementVerdict, EscalationReason,

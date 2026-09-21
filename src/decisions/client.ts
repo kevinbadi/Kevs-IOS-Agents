@@ -143,7 +143,7 @@ export function createDecisions(scope: DecisionScope, options: CreateDecisionsOp
                 }
                 : { value: UNKNOWN, confidence: 0, probabilities: {}, escalate: true, reason: reason ?? 'error', latencyMs, usage };
             record({
-                kind: 'screen', questions: questions as unknown as JsonObject,
+                kind: 'screen', questions: questions as unknown as JsonObject, elements: state.elements,
                 chosen: pick ? pick.choice : null, probabilities: verdict.probabilities,
                 confidence: pick ? pick.confidence : null, fits: fits ?? null,
                 escalated: verdict.escalate, escalationReason: verdict.reason ?? null,
@@ -202,7 +202,7 @@ export function createDecisions(scope: DecisionScope, options: CreateDecisionsOp
                 };
             }
             record({
-                kind: 'element', questions: { goal, options: criteria } as unknown as JsonObject,
+                kind: 'element', questions: { goal, options: criteria } as unknown as JsonObject, elements: state.elements,
                 chosen: pick ? pick.choice : null, probabilities: verdict.probabilities,
                 confidence: pick ? pick.confidence : null, fits: fits ?? null,
                 escalated: verdict.escalate, escalationReason: verdict.reason ?? null,
@@ -230,7 +230,7 @@ export function createDecisions(scope: DecisionScope, options: CreateDecisionsOp
                 ? { answers, escalate: false, latencyMs, usage }
                 : { answers, escalate: true, reason: reason ?? 'error', latencyMs, usage };
             record({
-                kind: 'ask', questions: questionsByid as unknown as JsonObject,
+                kind: 'ask', questions: questionsByid as unknown as JsonObject, elements: state.elements,
                 chosen: null, probabilities: answers, confidence: null, fits: null,
                 escalated: result.escalate, escalationReason: result.reason ?? null,
                 latencyMs, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens,

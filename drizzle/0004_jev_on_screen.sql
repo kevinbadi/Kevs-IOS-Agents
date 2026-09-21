@@ -1,0 +1,1 @@
+ALTER TABLE "scheduler"."decisions" ADD COLUMN "elements" jsonb DEFAULT '[]'::jsonb NOT NULL;

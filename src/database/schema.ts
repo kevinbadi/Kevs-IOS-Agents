@@ -105,6 +105,8 @@ export const decisions = schedulerSchema.table('decisions', {
     source: text('source'),
     model: text('model').notNull(),
     questions: jsonb('questions').$type<JsonObject>().notNull(),
+    /** The indexed element list the model chose from — lets the dashboard draw the decision on the screen. */
+    elements: jsonb('elements').$type<JsonObject[]>().notNull().default([]),
     chosen: text('chosen'),
     probabilities: jsonb('probabilities').$type<Record<string, number>>().notNull(),
     confidence: real('confidence'),

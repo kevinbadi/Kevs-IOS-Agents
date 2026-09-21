@@ -20,8 +20,11 @@ point. `test/decisions.test.ts` asserts this.
 | --- | --- |
 | `context.automation.elements()` | Visible, hittable, meaningful on-screen elements, pruned and numbered (≤ 120, nearest-to-centre kept when over). `src/devices/elements.ts`. |
 | `src/decisions/` | `createDecisions(scope)` → `decideScreen`, `chooseElement`, `ask`. Our interface, so the backend is swappable. |
-| `scheduler.decisions` | One row per decision: execution, device, question set, chosen value, probability map, confidence, fit, escalated, latency, tokens. |
-| `GET /api/decisions/metrics` | Escalation rate per ISO week — the number that decides whether this approach is working. |
+| `scheduler.decisions` | One row per decision: execution, device, question set, the element list the model saw, chosen value, probability map, confidence, fit, escalated, latency, tokens. |
+| `GET /api/decisions/metrics` | Escalation rate per ISO week — the number that decides whether this approach is working. `?source=` narrows it to one caller. |
+| `GET /api/decisions/recent` | Newest decisions with their elements, for drawing. `?deviceUdid=`, `?limit=`, `?after=<iso>`. |
+| `POST /api/decisions/probe` | Ask Jev about a phone's current screen without tapping: `{ deviceUdid, goal }` for an element pick, `{ deviceUdid }` (optionally `screens`) for a screen verdict. Recorded as `source: dashboard/probe`. |
+| `/decisions` page ("Jev") | The decisions drawn over the live phone screen — see below. |
 
 ## Verdicts and escalation
 
@@ -98,3 +101,34 @@ Each `elements()` call logs `kept N of M candidates (T nodes) · ~K tokens`
 into the execution log. The budget is ~4000 tokens for the list; Jev's
 accuracy degrades as irrelevant state grows, so smaller is better, not just
 cheaper. On the App Store's Today tab: 162 nodes → 29 elements → ~600 tokens.
+
+## Seeing it on the screen
+
+The **Jev** page (`/decisions`) draws every decision back over the live MJPEG
+stream of the phone it was made on, the way a game-playing demo overlays the
+model's move probabilities on the game:
+
+- every element in the pruned list is outlined ("what Jev saw") — if a target
+  is missing here, the pruner dropped it, not the model;
+- for element picks each box is filled in proportion to the probability the
+  model gave it, the pick glows with a pulsing tap point at its centre, and a
+  banner shows confidence, fit and latency;
+- for screen verdicts the banner names the screen and the side panel lists the
+  probability of every catalog entry;
+- an escalation turns the frame red and the pick (if any) dashed — nothing was
+  tapped.
+
+**Following** jumps to each new decision as it lands (polled every 1.5 s);
+click any row in the timeline to pin one. The layer toggle hides the
+zero-probability boxes when the screen gets busy.
+
+**Ask Jev now** reads the elements off the phone and asks a question on the
+spot — "which element would you tap to open the Reels tab?", or "which
+screen is this?" against the open-app catalog — so a goal or a catalog can be
+tuned against a real screen before it goes into a workflow. Probes never
+tap; they are recorded like any other decision under `source: dashboard/probe`
+(filter them out of the headline number with `/api/decisions/metrics?source=…`).
+
+Geometry comes from the element rects stored with each decision (points) and
+the phone's reported screen size; the model still never sees or produces a
+coordinate — the boxes are drawn by our code from the list we built.

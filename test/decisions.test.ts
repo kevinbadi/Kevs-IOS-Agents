@@ -99,6 +99,9 @@ test('the model never produces a coordinate: it returns an index and our code ma
     assert.equal(row.outputTokens, 50);
     assert.deepEqual(row.probabilities, { '0': 0.01, '1': 0.97, '2': 0.02, '3': 0, unknown: 0 });
     assert.ok(typeof row.latencyMs === 'number');
+    // …and the element list it chose from, so the dashboard can draw the decision back onto the screen.
+    assert.deepEqual(row.elements.map((element) => [element.i, element.rect]), ELEMENTS.map((element) => [element.index, [element.rect.x, element.rect.y, element.rect.w, element.rect.h]]));
+    assert.equal(row.elements[1]?.label, 'Don’t Allow');
 });
 
 test('nothing fits: a confident Choice winner still escalates when the paired Noul says no option is right', async () => {
@@ -258,6 +261,49 @@ test('GET /api/decisions/metrics reports the weekly escalation rate (503 without
     const bare = await createApp({ plugins: new PluginRegistry([]), scheduler: {} as import('../src/scheduler/repository.js').SchedulerRepository, dashboardTheme: defaultDashboardTheme, agentRunner: null, localAgentRunner: null });
     context.after(() => bare.close());
     assert.equal((await inject(bare, { method: 'GET', url: '/api/decisions/metrics' })).statusCode, 503);
+});
+
+test('GET /api/decisions/recent returns decisions with the elements they were drawn from, and the Jev page is served', async (context) => {
+    const { createApp } = await import('../src/api/app.js');
+    const { PluginRegistry } = await import('../src/registry.js');
+    const { defaultDashboardTheme } = await import('../src/dashboard-theme.js');
+    const { inject } = await import('./support.js');
+    const params: unknown[] = [];
+    const row = {
+        id: 'd1', created_at: new Date('2026-09-20T20:00:00Z'), execution_id: 'e1', device_udid: 'udid-1', kind: 'element', source: 'example/open-app',
+        model: 'jev-1.13.0', questions: { goal: 'dismiss', options: { '1': 'Button "Don’t Allow"' } },
+        elements: [{ i: 1, role: 'Button', label: 'Don’t Allow', rect: [40, 420, 150, 44] }],
+        chosen: '1', probabilities: { '1': 0.97, unknown: 0 }, confidence: 0.97, fits: 0.95, escalated: false, escalation_reason: null,
+        latency_ms: 210, input_tokens: 400, output_tokens: 50,
+    };
+    // Bound values sit directly in the SQL chunks (nested for sub-fragments); collect them to check the filters.
+    const collect = (chunk: unknown): void => {
+        if (Array.isArray(chunk)) chunk.forEach(collect);
+        else if (chunk && typeof chunk === 'object') {
+            if ('queryChunks' in chunk) collect((chunk as { queryChunks: unknown[] }).queryChunks);
+            else if ('value' in chunk) params.push((chunk as { value: unknown }).value);
+        } else if (typeof chunk === 'string' || typeof chunk === 'number') params.push(chunk);
+    };
+    const scheduler = { connection: { db: { async execute(query: unknown) { collect(query); return { rows: [row] }; } } } } as unknown as import('../src/scheduler/repository.js').SchedulerRepository;
+    const app = await createApp({ plugins: new PluginRegistry([]), scheduler, dashboardTheme: defaultDashboardTheme, agentRunner: null, localAgentRunner: null });
+    context.after(() => app.close());
+
+    const res = await inject(app, { method: 'GET', url: '/api/decisions/recent?deviceUdid=udid-1&limit=5' });
+    assert.equal(res.statusCode, 200, res.body);
+    const body = res.json() as { decisions: Array<{ id: string; createdAt: string; deviceUdid: string; elements: Array<{ i: number; rect: number[] }>; chosen: string; latencyMs: number }> };
+    assert.equal(body.decisions.length, 1);
+    assert.equal(body.decisions[0]?.createdAt, '2026-09-20T20:00:00.000Z');
+    assert.equal(body.decisions[0]?.chosen, '1');
+    assert.equal(body.decisions[0]?.latencyMs, 210);
+    assert.deepEqual(body.decisions[0]?.elements, [{ i: 1, role: 'Button', label: 'Don’t Allow', rect: [40, 420, 150, 44] }]);
+    assert.ok(params.includes('udid-1'), 'the device filter reaches the query');
+    assert.ok(params.includes(5), 'the limit reaches the query');
+
+    const page = await inject(app, { method: 'GET', url: '/decisions' });
+    assert.equal(page.statusCode, 200);
+    assert.match(page.body, /jev-overlay/);
+    assert.match(page.body, /\/assets\/decisions\.js\?v=/);
+    assert.equal((await inject(app, { method: 'GET', url: '/assets/decisions.js' })).statusCode, 200);
 });
 
 test('describeElement is words only', () => {

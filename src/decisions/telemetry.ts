@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 
 import type { DatabaseConnection } from '../database/client.js';
 import { decisions } from '../database/schema.js';
+import type { CompactElement } from '../devices/elements.js';
 import type { JsonObject } from '../types.js';
 import type { EscalationReason } from './types.js';
 
@@ -12,6 +13,8 @@ export interface DecisionRecord {
     source: string | null;
     model: string;
     questions: JsonObject;
+    /** Exactly what the model saw, so the decision can be drawn back onto the screen. */
+    elements: CompactElement[];
     chosen: string | null;
     probabilities: Record<string, number>;
     confidence: number | null;
@@ -53,6 +56,7 @@ export class DrizzleDecisionSink implements DecisionSink {
             source: record.source,
             model: record.model,
             questions: record.questions,
+            elements: record.elements as unknown as JsonObject[],
             chosen: record.chosen,
             probabilities: record.probabilities,
             confidence: record.confidence,
@@ -73,6 +77,91 @@ export class MemoryDecisionSink implements DecisionSink {
     async record(record: DecisionRecord): Promise<void> {
         this.records.push(record);
     }
+}
+
+export interface RecentDecision {
+    id: string;
+    createdAt: string;
+    executionId: string | null;
+    deviceUdid: string;
+    kind: string;
+    source: string | null;
+    model: string;
+    questions: JsonObject;
+    elements: CompactElement[];
+    chosen: string | null;
+    probabilities: Record<string, number>;
+    confidence: number | null;
+    fits: number | null;
+    escalated: boolean;
+    escalationReason: string | null;
+    latencyMs: number;
+    inputTokens: number;
+    outputTokens: number;
+}
+
+/** Raw row shape from `execute`; jsonb comes back parsed, timestamps as Date. */
+type RecentDecisionRow = Record<string, unknown> & {
+    id: string;
+    created_at: Date | string;
+    execution_id: string | null;
+    device_udid: string;
+    kind: string;
+    source: string | null;
+    model: string;
+    questions: JsonObject;
+    elements: CompactElement[] | null;
+    chosen: string | null;
+    probabilities: Record<string, number>;
+    confidence: number | null;
+    fits: number | null;
+    escalated: boolean;
+    escalation_reason: string | null;
+    latency_ms: number;
+    input_tokens: number;
+    output_tokens: number;
+};
+
+function toRecent(row: RecentDecisionRow): RecentDecision {
+    return {
+        id: row.id,
+        createdAt: new Date(row.created_at).toISOString(),
+        executionId: row.execution_id,
+        deviceUdid: row.device_udid,
+        kind: row.kind,
+        source: row.source,
+        model: row.model,
+        questions: row.questions,
+        elements: row.elements ?? [],
+        chosen: row.chosen,
+        probabilities: row.probabilities,
+        confidence: row.confidence,
+        fits: row.fits,
+        escalated: row.escalated,
+        escalationReason: row.escalation_reason,
+        latencyMs: Number(row.latency_ms),
+        inputTokens: Number(row.input_tokens),
+        outputTokens: Number(row.output_tokens),
+    };
+}
+
+/** Newest first. `after` returns only decisions made after that instant (for live polling). */
+export async function listRecentDecisions(
+    connection: DatabaseConnection,
+    options: { deviceUdid?: string; limit?: number; after?: Date } = {},
+): Promise<RecentDecision[]> {
+    const limit = Math.min(200, Math.max(1, options.limit ?? 30));
+    const byDevice = options.deviceUdid ? sql`and ${decisions.deviceUdid} = ${options.deviceUdid}` : sql``;
+    const since = options.after ? sql`and ${decisions.createdAt} > ${options.after.toISOString()}::timestamptz` : sql``;
+    const rows = await connection.db.execute<RecentDecisionRow>(sql`
+        select id, created_at, execution_id, device_udid, kind, source, model, questions, elements, chosen,
+               probabilities, confidence, fits, escalated, escalation_reason, latency_ms, input_tokens, output_tokens
+        from ${decisions}
+        where true ${byDevice} ${since}
+        order by ${decisions.createdAt} desc
+        limit ${limit}
+    `);
+    return rows.rows.map(toRecent);
 }
 
 export interface EscalationBucket {

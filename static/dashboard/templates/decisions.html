@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Jev · IOS AGENTS</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Syne:wght@600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/assets/styles.css">
+</head>
+<body class="agent-page jev-page">
+    <header class="topbar">
+        <div class="topbar-inner">
+            <a class="brand" href="/">
+                <span class="brand-mark" aria-hidden="true"></span>
+                <span class="brand-text">
+                    <span class="brand-name">IOS AGENTS</span>
+                    <span class="brand-by">by kevbuilds apps</span>
+                </span>
+            </a>
+            <nav class="topbar-nav">
+                <a class="button secondary" href="/">Devices</a>
+                <a class="button secondary" href="/automations">Automations</a>
+                <a class="button secondary" href="/results">Results</a>
+                <a class="button secondary" href="/agent">Agent (Cloud)</a>
+                <a class="button secondary" href="/agent-local">Agent (Local)</a>
+                <a class="button secondary" href="/decisions" aria-current="page">Jev</a>
+                <a class="button secondary" href="/tasks">Tasks</a>
+                __PLUGIN_NAV____AUTH_NAV__
+            </nav>
+        </div>
+    </header>
+    <main class="shell agent-shell">
+        <header class="page-header agent-header">
+            <div>
+                <span class="eyebrow">Semantic decisions · System One · drawn on the screen</span>
+                <h1>Jev <em>on screen</em></h1>
+                <p>Every time a workflow asks Jev "which screen is this" or "which element do I tap", the elements it saw are drawn over the live phone, weighted by the probability it gave each one. The pick glows; an escalation turns the frame red. Use it to see <em>why</em> a decision went the way it did and tune the screen catalog, goals, and pruner.</p>
+            </div>
+            <div id="jev-model-badge" class="agent-model-badge" hidden>
+                <span class="agent-model-dot" aria-hidden="true"></span>
+                <span id="jev-model-name">…</span>
+            </div>
+        </header>
+
+        <section id="jev-unconfigured" class="panel agent-unconfigured" hidden>
+            <span class="eyebrow">Setup needed</span>
+            <h2>Decisions are off</h2>
+            <p>Set <code>TYPESAFE_API_KEY</code> in <code>.env</code> and restart the worker. Until then every plugin uses its built-in logic and nothing leaves this Mac. Past decisions, if any, still show below.</p>
+        </section>
+
+        <section class="panel jev-metrics">
+            <dl class="jev-metric-grid">
+                <div><dt>Decisions</dt><dd id="jev-metric-total">—</dd></div>
+                <div><dt>Escalation rate</dt><dd id="jev-metric-rate">—</dd></div>
+                <div><dt>This week</dt><dd id="jev-metric-week">—</dd></div>
+                <div><dt>Last week</dt><dd id="jev-metric-prev">—</dd></div>
+                <div><dt>Median latency</dt><dd id="jev-metric-latency">—</dd></div>
+                <div><dt>Model</dt><dd id="jev-metric-model">—</dd></div>
+            </dl>
+            <p class="jev-metric-note">The number that matters is escalation rate over time. If it is not falling week over week, the approach is not working.</p>
+        </section>
+
+        <div class="agent-grid jev-grid">
+            <section class="panel agent-live jev-stage-panel">
+                <div class="agent-live-head">
+                    <div>
+                        <span class="eyebrow">Live</span>
+                        <h2 id="jev-title" class="agent-live-goal">Waiting for a decision</h2>
+                        <p id="jev-meta" class="agent-live-meta">Pick a phone. The overlay updates the moment a workflow asks Jev something.</p>
+                    </div>
+                    <div class="agent-live-actions">
+                        <label class="jev-device-pick">
+                            <span>Phone</span>
+                            <select id="jev-device"><option value="">All phones</option></select>
+                        </label>
+                        <button id="jev-follow" class="agent-voice is-on" type="button" aria-pressed="true" title="Jump to each new decision as it happens"><span class="agent-voice-icon" aria-hidden="true"></span><span id="jev-follow-label">Following</span></button>
+                    </div>
+                </div>
+                <form id="jev-probe" class="jev-probe" autocomplete="off">
+                    <span class="eyebrow">Ask Jev now · nothing gets tapped</span>
+                    <div class="jev-probe-row">
+                        <input id="jev-probe-goal" type="text" maxlength="300" placeholder="Which element would you tap to… e.g. open the Reels tab">
+                        <button id="jev-probe-element" class="button primary" type="submit">Which element?</button>
+                        <button id="jev-probe-screen" class="button secondary" type="button">Which screen?</button>
+                    </div>
+                    <p id="jev-probe-status" class="jev-probe-status" role="status" hidden></p>
+                </form>
+                <div class="agent-stage jev-stage">
+                    <figure class="agent-screen">
+                        <div id="jev-frame" class="agent-screen-frame jev-frame">
+                            <img id="jev-screen-img" alt="" hidden>
+                            <div id="jev-screen-empty" class="agent-screen-empty">
+                                <div class="device-icon" aria-hidden="true"></div>
+                                <p id="jev-screen-empty-text">Pick a phone to see its screen here.</p>
+                            </div>
+                            <svg id="jev-overlay" class="jev-overlay" viewBox="0 0 390 844" preserveAspectRatio="none" aria-hidden="true"></svg>
+                            <div id="jev-banner" class="jev-banner" hidden></div>
+                            <span id="jev-live-badge" class="agent-live-badge" hidden><span class="agent-live-badge-dot" aria-hidden="true"></span>Live</span>
+                        </div>
+                        <div class="agent-screen-modes" role="group" aria-label="Overlay">
+                            <button id="jev-layer-all" type="button" class="agent-screen-mode is-active" data-layer="all">All elements</button>
+                            <button id="jev-layer-scored" type="button" class="agent-screen-mode" data-layer="scored">Scored only</button>
+                            <button id="jev-layer-pick" type="button" class="agent-screen-mode" data-layer="pick">Pick only</button>
+                        </div>
+                        <figcaption id="jev-caption" class="agent-screen-caption"></figcaption>
+                    </figure>
+                    <div class="agent-thought jev-thought">
+                        <span class="eyebrow">What Jev was asked</span>
+                        <p id="jev-question" class="agent-thought-text">—</p>
+                        <div id="jev-verdict" class="agent-action-chip" hidden></div>
+                        <dl class="agent-stats jev-stats">
+                            <div><dt>Confidence</dt><dd id="jev-stat-confidence">—</dd></div>
+                            <div><dt>Fits</dt><dd id="jev-stat-fits">—</dd></div>
+                            <div><dt>Latency</dt><dd id="jev-stat-latency">—</dd></div>
+                            <div><dt>Tokens</dt><dd id="jev-stat-tokens">—</dd></div>
+                        </dl>
+                        <span class="eyebrow">Probabilities</span>
+                        <ol id="jev-probabilities" class="jev-probabilities"><li class="jev-empty">No decision selected.</li></ol>
+                        <details class="jev-elements-details">
+                            <summary>Elements Jev saw <span id="jev-elements-count"></span></summary>
+                            <ol id="jev-elements" class="jev-elements"></ol>
+                        </details>
+                    </div>
+                </div>
+            </section>
+
+            <div class="agent-column">
+                <section class="panel agent-history-panel">
+                    <div class="section-heading">
+                        <div><span class="eyebrow">Timeline</span><h2>Recent decisions</h2></div>
+                        <button id="jev-refresh" class="button secondary" type="button">Refresh</button>
+                    </div>
+                    <ol id="jev-history" class="agent-history jev-history loading-card"><span class="spinner" aria-hidden="true"></span>Loading decisions…</ol>
+                </section>
+                <section class="panel agent-loop-card">
+                    <span class="eyebrow">How to read it</span>
+                    <ol class="agent-loop jev-legend">
+                        <li><strong><span class="jev-swatch jev-swatch-pick"></span>Pick</strong><span>The element Jev chose. Our code taps its centre — Jev never outputs a coordinate.</span></li>
+                        <li><strong><span class="jev-swatch jev-swatch-scored"></span>Weighted</strong><span>Brighter fill = more probability. Most candidates sit at 0 %.</span></li>
+                        <li><strong><span class="jev-swatch jev-swatch-seen"></span>Seen</strong><span>Every element in the pruned list. If a target is missing here, the pruner dropped it.</span></li>
+                        <li><strong><span class="jev-swatch jev-swatch-escalate"></span>Escalate</strong><span>Low confidence, "unknown", or the paired Noul said nothing fits. Nothing is tapped.</span></li>
+                    </ol>
+                </section>
+            </div>
+        </div>
+    </main>
+    <script type="module" src="/assets/decisions.js"></script>
+    <footer class="app-footer">__FOOTER__</footer>
+</body>
+</html>
