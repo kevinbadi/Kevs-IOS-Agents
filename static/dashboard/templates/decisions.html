@@ -31,16 +31,12 @@
             </nav>
         </div>
     </header>
-    <main class="shell agent-shell">
-        <header class="page-header agent-header">
+    <main class="shell agent-shell jev-shell">
+        <header class="page-header agent-header jev-header">
             <div>
-                <span class="eyebrow">Semantic decisions · System One · drawn on the screen</span>
-                <h1>Jev <em>on screen</em></h1>
-                <p>Every time a workflow asks Jev "which screen is this" or "which element do I tap", the elements it saw are drawn over the live phone, weighted by the probability it gave each one. The pick glows; an escalation turns the frame red. Use it to see <em>why</em> a decision went the way it did and tune the screen catalog, goals, and pruner.</p>
-            </div>
-            <div id="jev-model-badge" class="agent-model-badge" hidden>
-                <span class="agent-model-dot" aria-hidden="true"></span>
-                <span id="jev-model-name">…</span>
+                <span class="eyebrow">Semantic decisions · System One · live on the phone</span>
+                <h1>Jev <em>is watching</em></h1>
+                <p>The elements Jev saw are drawn over the live phone, weighted by the probability it gave each one. The HUD shows the lanes it chose between, the keys it can press, and a live feed of every decision as it lands.</p>
             </div>
         </header>
 
@@ -50,45 +46,21 @@
             <p>Set <code>TYPESAFE_API_KEY</code> in <code>.env</code> and restart the worker. Until then every plugin uses its built-in logic and nothing leaves this Mac. Past decisions, if any, still show below.</p>
         </section>
 
-        <section class="panel jev-metrics">
-            <dl class="jev-metric-grid">
-                <div><dt>Decisions</dt><dd id="jev-metric-total">—</dd></div>
-                <div><dt>Escalation rate</dt><dd id="jev-metric-rate">—</dd></div>
-                <div><dt>This week</dt><dd id="jev-metric-week">—</dd></div>
-                <div><dt>Last week</dt><dd id="jev-metric-prev">—</dd></div>
-                <div><dt>Median latency</dt><dd id="jev-metric-latency">—</dd></div>
-                <div><dt>Model</dt><dd id="jev-metric-model">—</dd></div>
-            </dl>
-            <p class="jev-metric-note">The number that matters is escalation rate over time. If it is not falling week over week, the approach is not working.</p>
-        </section>
-
-        <div class="agent-grid jev-grid">
-            <section class="panel agent-live jev-stage-panel">
-                <div class="agent-live-head">
+        <div class="jev-layout">
+            <section class="panel jev-stage-panel">
+                <div class="jev-stage-head">
                     <div>
                         <span class="eyebrow">Live</span>
                         <h2 id="jev-title" class="agent-live-goal">Waiting for a decision</h2>
                         <p id="jev-meta" class="agent-live-meta">Pick a phone. The overlay updates the moment a workflow asks Jev something.</p>
                     </div>
-                    <div class="agent-live-actions">
-                        <label class="jev-device-pick">
-                            <span>Phone</span>
-                            <select id="jev-device"><option value="">All phones</option></select>
-                        </label>
-                        <button id="jev-follow" class="agent-voice is-on" type="button" aria-pressed="true" title="Jump to each new decision as it happens"><span class="agent-voice-icon" aria-hidden="true"></span><span id="jev-follow-label">Following</span></button>
-                    </div>
+                    <label class="jev-device-pick">
+                        <span>Phone</span>
+                        <select id="jev-device"><option value="">All phones</option></select>
+                    </label>
                 </div>
-                <form id="jev-probe" class="jev-probe" autocomplete="off">
-                    <span class="eyebrow">Ask Jev now · nothing gets tapped</span>
-                    <div class="jev-probe-row">
-                        <input id="jev-probe-goal" type="text" maxlength="300" placeholder="Which element would you tap to… e.g. open the Reels tab">
-                        <button id="jev-probe-element" class="button primary" type="submit">Which element?</button>
-                        <button id="jev-probe-screen" class="button secondary" type="button">Which screen?</button>
-                    </div>
-                    <p id="jev-probe-status" class="jev-probe-status" role="status" hidden></p>
-                </form>
-                <div class="agent-stage jev-stage">
-                    <figure class="agent-screen">
+                <div class="jev-stage">
+                    <figure class="agent-screen jev-screen">
                         <div id="jev-frame" class="agent-screen-frame jev-frame">
                             <img id="jev-screen-img" alt="" hidden>
                             <div id="jev-screen-empty" class="agent-screen-empty">
@@ -100,50 +72,93 @@
                             <span id="jev-live-badge" class="agent-live-badge" hidden><span class="agent-live-badge-dot" aria-hidden="true"></span>Live</span>
                         </div>
                         <div class="agent-screen-modes" role="group" aria-label="Overlay">
-                            <button id="jev-layer-all" type="button" class="agent-screen-mode is-active" data-layer="all">All elements</button>
-                            <button id="jev-layer-scored" type="button" class="agent-screen-mode" data-layer="scored">Scored only</button>
-                            <button id="jev-layer-pick" type="button" class="agent-screen-mode" data-layer="pick">Pick only</button>
+                            <button type="button" class="agent-screen-mode is-active" data-layer="all">All elements</button>
+                            <button type="button" class="agent-screen-mode" data-layer="scored">Scored only</button>
+                            <button type="button" class="agent-screen-mode" data-layer="pick">Pick only</button>
                         </div>
                         <figcaption id="jev-caption" class="agent-screen-caption"></figcaption>
                     </figure>
-                    <div class="agent-thought jev-thought">
-                        <span class="eyebrow">What Jev was asked</span>
-                        <p id="jev-question" class="agent-thought-text">—</p>
-                        <div id="jev-verdict" class="agent-action-chip" hidden></div>
-                        <dl class="agent-stats jev-stats">
-                            <div><dt>Confidence</dt><dd id="jev-stat-confidence">—</dd></div>
-                            <div><dt>Fits</dt><dd id="jev-stat-fits">—</dd></div>
-                            <div><dt>Latency</dt><dd id="jev-stat-latency">—</dd></div>
-                            <div><dt>Tokens</dt><dd id="jev-stat-tokens">—</dd></div>
-                        </dl>
-                        <span class="eyebrow">Probabilities</span>
-                        <ol id="jev-probabilities" class="jev-probabilities"><li class="jev-empty">No decision selected.</li></ol>
-                        <details class="jev-elements-details">
-                            <summary>Elements Jev saw <span id="jev-elements-count"></span></summary>
+                    <div class="jev-stage-side">
+                        <form id="jev-probe" class="jev-probe" autocomplete="off">
+                            <span class="eyebrow">Ask Jev now · nothing gets tapped</span>
+                            <input id="jev-probe-goal" type="text" maxlength="300" placeholder="Which element would you tap to… e.g. open the Reels tab">
+                            <div class="jev-probe-row">
+                                <button id="jev-probe-element" class="button primary" type="submit">Which element?</button>
+                                <button id="jev-probe-screen" class="button secondary" type="button">Which screen?</button>
+                            </div>
+                            <p id="jev-probe-status" class="jev-probe-status" role="status" hidden></p>
+                        </form>
+                        <div class="jev-asked">
+                            <span class="eyebrow">What Jev was asked</span>
+                            <p id="jev-question" class="jev-question">—</p>
+                        </div>
+                        <ol class="jev-legend">
+                            <li><span class="jev-swatch jev-swatch-pick"></span><strong>Pick</strong> — tapped at its centre</li>
+                            <li><span class="jev-swatch jev-swatch-scored"></span><strong>Weighted</strong> — fill = probability</li>
+                            <li><span class="jev-swatch jev-swatch-seen"></span><strong>Seen</strong> — every element in the pruned list</li>
+                            <li><span class="jev-swatch jev-swatch-escalate"></span><strong>Escalate</strong> — nothing tapped</li>
+                        </ol>
+                        <details id="jev-elements-details" class="jev-elements-details">
+                            <summary>What Jev sees <span id="jev-elements-count"></span></summary>
                             <ol id="jev-elements" class="jev-elements"></ol>
                         </details>
                     </div>
                 </div>
             </section>
 
-            <div class="agent-column">
-                <section class="panel agent-history-panel">
-                    <div class="section-heading">
-                        <div><span class="eyebrow">Timeline</span><h2>Recent decisions</h2></div>
-                        <button id="jev-refresh" class="button secondary" type="button">Refresh</button>
+            <aside class="jev-hud" aria-label="Jev HUD">
+                <div id="jev-hud-brand" class="jev-hud-card jev-hud-brand is-idle">
+                    <span class="jev-hud-mark" aria-hidden="true"><span class="jev-hud-mark-dot"></span></span>
+                    <div class="jev-hud-brand-text">
+                        <strong>JEV</strong>
+                        <span id="jev-hud-state" class="jev-hud-state">is watching</span>
+                        <span id="jev-hud-model" class="jev-hud-sub">System One · —</span>
                     </div>
-                    <ol id="jev-history" class="agent-history jev-history loading-card"><span class="spinner" aria-hidden="true"></span>Loading decisions…</ol>
-                </section>
-                <section class="panel agent-loop-card">
-                    <span class="eyebrow">How to read it</span>
-                    <ol class="agent-loop jev-legend">
-                        <li><strong><span class="jev-swatch jev-swatch-pick"></span>Pick</strong><span>The element Jev chose. Our code taps its centre — Jev never outputs a coordinate.</span></li>
-                        <li><strong><span class="jev-swatch jev-swatch-scored"></span>Weighted</strong><span>Brighter fill = more probability. Most candidates sit at 0 %.</span></li>
-                        <li><strong><span class="jev-swatch jev-swatch-seen"></span>Seen</strong><span>Every element in the pruned list. If a target is missing here, the pruner dropped it.</span></li>
-                        <li><strong><span class="jev-swatch jev-swatch-escalate"></span>Escalate</strong><span>Low confidence, "unknown", or the paired Noul said nothing fits. Nothing is tapped.</span></li>
-                    </ol>
-                </section>
-            </div>
+                    <span id="jev-hud-latency" class="jev-hud-latency">— ms</span>
+                </div>
+
+                <div class="jev-hud-card jev-hud-lanes">
+                    <div class="jev-hud-card-head">
+                        <span class="eyebrow"><span id="jev-lanes-title">This decision</span> <em id="jev-lanes-when"></em></span>
+                        <button id="jev-what-sees" type="button" class="jev-hud-button">What Jev sees</button>
+                    </div>
+                    <div id="jev-lanes" class="jev-lanes"><p class="jev-empty">No decision yet.</p></div>
+                    <div id="jev-verdict" class="jev-verdict is-idle">
+                        <span class="jev-verdict-arrow" aria-hidden="true">›</span>
+                        <strong id="jev-verdict-main" class="jev-verdict-main">—</strong>
+                        <span id="jev-verdict-sub" class="jev-verdict-sub"></span>
+                    </div>
+                </div>
+
+                <div class="jev-hud-card jev-hud-keys">
+                    <div class="jev-hud-card-head">
+                        <span class="eyebrow">Keys · what the workflow can do</span>
+                    </div>
+                    <div class="jev-keys">
+                        <button type="button" class="jev-key" data-key="tap" disabled><kbd>⊙</kbd><span>Tap</span></button>
+                        <button type="button" class="jev-key" data-key="launch" disabled><kbd>▣</kbd><span>Launch</span></button>
+                        <button type="button" class="jev-key" data-key="wait" disabled><kbd>◷</kbd><span>Wait</span></button>
+                        <button type="button" class="jev-key" data-key="escalate" disabled><kbd>↗</kbd><span>Escalate</span></button>
+                    </div>
+                    <p id="jev-key-note" class="jev-key-note">Jev never presses a key itself — it answers with an index and the workflow decides.</p>
+                </div>
+
+                <div class="jev-hud-card jev-hud-feed">
+                    <div class="jev-hud-card-head">
+                        <span class="eyebrow">Live feed <em>newest first</em></span>
+                        <button id="jev-refresh" type="button" class="jev-hud-button">Refresh</button>
+                    </div>
+                    <ol id="jev-feed" class="jev-feed"><li class="jev-empty">Loading decisions…</li></ol>
+                </div>
+
+                <div class="jev-hud-foot">
+                    <div class="jev-hud-toggles">
+                        <button id="jev-follow" class="jev-toggle is-on" type="button" aria-pressed="true" title="Jump to each new decision as it happens"><span class="jev-toggle-dot" aria-hidden="true"></span><span id="jev-follow-label">Following</span></button>
+                        <span id="jev-enabled-pill" class="jev-toggle is-static">Decisions · …</span>
+                    </div>
+                    <p id="jev-hud-stats" class="jev-hud-stats">—</p>
+                </div>
+            </aside>
         </div>
     </main>
     <script type="module" src="/assets/decisions.js"></script>

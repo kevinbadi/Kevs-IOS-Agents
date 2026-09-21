@@ -1,8 +1,10 @@
 /**
- * Jev on screen: draws every semantic decision (src/decisions) back over the
- * phone it was made on. The element list the model saw is rendered as boxes
- * weighted by the probability it assigned each; the pick glows; escalations
- * turn the frame red. Live mode follows the newest decision as it lands.
+ * Jev on screen. Left: the live phone with every semantic decision
+ * (src/decisions) drawn back over it — the element list the model saw as
+ * boxes weighted by probability, the pick glowing, escalations in red.
+ * Right: a HUD in the style of a game-playing demo — the lanes it chose
+ * between with big percentages, the keys the workflow can press (and which
+ * one this verdict pressed), and a live feed of decisions as they land.
  */
 
 interface CompactElement {
@@ -49,6 +51,7 @@ interface Metrics {
 }
 
 type Layer = 'all' | 'scored' | 'pick';
+type Key = 'tap' | 'launch' | 'wait' | 'escalate';
 
 const $ = <T extends Element>(selector: string): T => {
     const element = document.querySelector<T>(selector);
@@ -59,6 +62,7 @@ const $ = <T extends Element>(selector: string): T => {
 const deviceSelect = $<HTMLSelectElement>('#jev-device');
 const followButton = $<HTMLButtonElement>('#jev-follow');
 const followLabel = $<HTMLElement>('#jev-follow-label');
+const enabledPill = $<HTMLElement>('#jev-enabled-pill');
 const title = $<HTMLElement>('#jev-title');
 const meta = $<HTMLElement>('#jev-meta');
 const frame = $<HTMLElement>('#jev-frame');
@@ -70,25 +74,33 @@ const banner = $<HTMLElement>('#jev-banner');
 const liveBadge = $<HTMLElement>('#jev-live-badge');
 const caption = $<HTMLElement>('#jev-caption');
 const questionEl = $<HTMLElement>('#jev-question');
-const verdictEl = $<HTMLElement>('#jev-verdict');
-const statConfidence = $<HTMLElement>('#jev-stat-confidence');
-const statFits = $<HTMLElement>('#jev-stat-fits');
-const statLatency = $<HTMLElement>('#jev-stat-latency');
-const statTokens = $<HTMLElement>('#jev-stat-tokens');
-const probabilitiesEl = $<HTMLOListElement>('#jev-probabilities');
+const elementsDetails = $<HTMLDetailsElement>('#jev-elements-details');
 const elementsEl = $<HTMLOListElement>('#jev-elements');
 const elementsCount = $<HTMLElement>('#jev-elements-count');
-const historyEl = $<HTMLOListElement>('#jev-history');
-const refreshButton = $<HTMLButtonElement>('#jev-refresh');
-const unconfigured = $<HTMLElement>('#jev-unconfigured');
-const modelBadge = $<HTMLElement>('#jev-model-badge');
-const modelName = $<HTMLElement>('#jev-model-name');
+const whatSeesButton = $<HTMLButtonElement>('#jev-what-sees');
 const layerButtons = [...document.querySelectorAll<HTMLButtonElement>('.agent-screen-mode[data-layer]')];
 const probeForm = $<HTMLFormElement>('#jev-probe');
 const probeGoal = $<HTMLInputElement>('#jev-probe-goal');
 const probeElementButton = $<HTMLButtonElement>('#jev-probe-element');
 const probeScreenButton = $<HTMLButtonElement>('#jev-probe-screen');
 const probeStatus = $<HTMLElement>('#jev-probe-status');
+// HUD
+const hudBrand = $<HTMLElement>('#jev-hud-brand');
+const hudState = $<HTMLElement>('#jev-hud-state');
+const hudModel = $<HTMLElement>('#jev-hud-model');
+const hudLatency = $<HTMLElement>('#jev-hud-latency');
+const lanesTitle = $<HTMLElement>('#jev-lanes-title');
+const lanesWhen = $<HTMLElement>('#jev-lanes-when');
+const lanesEl = $<HTMLElement>('#jev-lanes');
+const verdictEl = $<HTMLElement>('#jev-verdict');
+const verdictMain = $<HTMLElement>('#jev-verdict-main');
+const verdictSub = $<HTMLElement>('#jev-verdict-sub');
+const keyButtons = [...document.querySelectorAll<HTMLButtonElement>('.jev-key[data-key]')];
+const keyNote = $<HTMLElement>('#jev-key-note');
+const feedEl = $<HTMLOListElement>('#jev-feed');
+const refreshButton = $<HTMLButtonElement>('#jev-refresh');
+const hudStats = $<HTMLElement>('#jev-hud-stats');
+const unconfigured = $<HTMLElement>('#jev-unconfigured');
 
 let devices: DeviceSummary[] = [];
 let decisions: RecentDecision[] = [];
@@ -98,10 +110,16 @@ let layer: Layer = 'all';
 let liveUdid: string | null = null;
 let liveRetryTimer: number | null = null;
 let pollTimer: number | null = null;
+let metrics: Metrics | null = null;
+/** A probe in flight — the feed shows an "asking…" row and the brand card says "is deciding". */
+let asking: { kind: 'element' | 'screen'; goal?: string; startedAt: number } | null = null;
 /** Points size of each phone's screen, for scaling rects onto the stream. */
 const screenSizes = new Map<string, { width: number; height: number }>();
+const sizeLookups = new Set<string>();
 
 const SVG = 'http://www.w3.org/2000/svg';
+/** How long after a decision lands the brand card keeps saying "is deciding". */
+const DECIDING_GLOW_MS = 6_000;
 
 function escapeHtml(value: unknown): string {
     return String(value ?? '').replace(/[&<>"']/g, (character) => ({
@@ -126,6 +144,8 @@ function timeAgo(iso: string): string {
     return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
+const clock = (iso: string): string => new Date(iso).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+
 async function api<T>(url: string, init?: RequestInit): Promise<T> {
     const response = await fetch(url, init);
     const body = await response.json().catch(() => ({})) as T & { error?: string };
@@ -135,6 +155,11 @@ async function api<T>(url: string, init?: RequestInit): Promise<T> {
 
 function deviceLabel(udid: string): string {
     return devices.find((device) => device.udid === udid)?.name ?? udid;
+}
+
+function shortSource(source: string | null): string {
+    if (!source) return 'unknown';
+    return source.replace(/^example\//, '').replace(/^dashboard\//, '');
 }
 
 // --- live stream -------------------------------------------------------------
@@ -183,8 +208,6 @@ screenImg.addEventListener('error', () => {
     liveRetryTimer = window.setTimeout(() => showLiveStream(liveUdid, true), 5_000);
 });
 
-const sizeLookups = new Set<string>();
-
 async function ensureScreenSize(udid: string): Promise<void> {
     if (screenSizes.has(udid) || sizeLookups.has(udid)) return;
     sizeLookups.add(udid);
@@ -194,30 +217,87 @@ async function ensureScreenSize(udid: string): Promise<void> {
         const current = currentDecision();
         if (current && current.deviceUdid === udid) {
             drawOverlay(current);
-            renderPanel(current);
+            renderCaption(current);
         }
     } catch {
-        // Offline phone: the 390×844 default below stays in effect; retry on the next selection.
+        // Offline phone: the 390×844 default stays in effect; retry on the next selection.
         sizeLookups.delete(udid);
     }
 }
 
 /**
- * Screen size in points for a decision. The phone reports it when connected;
- * until then assume the common 390×844. Element extents are not a good guide
- * because partly visible cells extend past the screen edge.
+ * Screen size in points. The phone reports it when connected; until then
+ * assume 390×844. Element extents are not a good guide because partly
+ * visible cells extend past the screen edge.
  */
 function screenSizeFor(decision: RecentDecision): { width: number; height: number } {
     return screenSizes.get(decision.deviceUdid) ?? { width: 390, height: 844 };
 }
 
-// --- overlay -----------------------------------------------------------------
+// --- decision semantics ----------------------------------------------------------
 
-/** How much probability the model put on this element (element decisions only). */
 function probabilityFor(decision: RecentDecision, element: CompactElement): number | null {
     if (decision.kind !== 'element') return null;
     return decision.probabilities[String(element.i)] ?? 0;
 }
+
+function chosenElement(decision: RecentDecision): CompactElement | undefined {
+    if (decision.kind !== 'element' || !decision.chosen || !/^\d+$/.test(decision.chosen)) return undefined;
+    const index = Number(decision.chosen);
+    return decision.elements.find((element) => element.i === index);
+}
+
+function elementName(element: CompactElement | undefined, index: string): string {
+    if (!element) return `#${index}`;
+    return element.label ?? element.value ?? element.role;
+}
+
+function kindTitle(kind: string): string {
+    return kind === 'screen' ? 'Which screen is this?' : kind === 'element' ? 'Which element do I tap?' : 'Yes / no check';
+}
+
+/** The plain-English question the workflow asked, reconstructed from what was stored. */
+function questionText(decision: RecentDecision): string {
+    const q = decision.questions;
+    if (decision.kind === 'element') return `Which element should be tapped to: ${String(q.goal ?? '')}`;
+    if (decision.kind === 'screen') {
+        const pick = q.pick as { criteria?: Record<string, string> } | undefined;
+        const names = Object.keys(pick?.criteria ?? {}).filter((name) => name !== 'unknown');
+        return `Which screen is showing? Options: ${names.join(', ') || '—'}`;
+    }
+    return Object.entries(q).map(([id, text]) => `${id}: ${String(text)}`).join(' · ');
+}
+
+/**
+ * Which key this verdict presses. Jev only answers; the workflow acts. For
+ * the known callers the mapping is deterministic, so the HUD can light it up.
+ */
+function keyFor(decision: RecentDecision): { key: Key | null; note: string } {
+    const probe = decision.source === 'dashboard/probe';
+    if (decision.escalated) {
+        return { key: 'escalate', note: `Escalated (${decision.escalationReason ?? 'unknown'}) — the workflow falls back to its plain path. Nothing tapped.` };
+    }
+    if (probe) {
+        return { key: null, note: 'Probe from this page — keys locked, nothing was pressed. A workflow would act on this verdict.' };
+    }
+    if (decision.kind === 'element') {
+        const element = chosenElement(decision);
+        if (!element) return { key: null, note: 'No element resolved.' };
+        const [x, y, w, h] = element.rect;
+        return { key: 'tap', note: `Tap at (${Math.round(x + w / 2)}, ${Math.round(y + h / 2)}) — the centre of #${element.i} ${elementName(element, String(element.i))}. Jev returned the index; the point is ours.` };
+    }
+    if (decision.kind === 'screen') {
+        switch (decision.chosen) {
+            case 'system-prompt': return { key: 'tap', note: 'System prompt on top — next Jev is asked which button dismisses it, then that element is tapped.' };
+            case 'home-screen': return { key: 'launch', note: 'App is not in the foreground — launched once more.' };
+            case 'sign-in': return { key: 'wait', note: 'Sign-in screen — left for the operator, plain wait.' };
+            default: return { key: 'wait', note: "App's own interface is up — nothing to do, plain wait." };
+        }
+    }
+    return { key: null, note: 'Yes/no check — informs the workflow, no key of its own.' };
+}
+
+// --- overlay -------------------------------------------------------------------------
 
 function drawOverlay(decision: RecentDecision | null): void {
     overlay.replaceChildren();
@@ -228,12 +308,10 @@ function drawOverlay(decision: RecentDecision | null): void {
     }
     const screen = screenSizeFor(decision);
     overlay.setAttribute('viewBox', `0 0 ${screen.width} ${screen.height}`);
-    // Match the frame to the real screen so the stream isn't cropped under the boxes.
     frame.style.aspectRatio = `${screen.width} / ${screen.height}`;
-    const chosenIndex = decision.kind === 'element' && decision.chosen && /^\d+$/.test(decision.chosen) ? Number(decision.chosen) : null;
+    const picked = chosenElement(decision);
     const pickEscalated = decision.kind === 'element' && decision.escalated;
 
-    // Dim everything but the pick so the choice reads at a glance.
     const shade = document.createElementNS(SVG, 'rect');
     shade.setAttribute('class', 'jev-shade');
     shade.setAttribute('width', String(screen.width));
@@ -243,7 +321,7 @@ function drawOverlay(decision: RecentDecision | null): void {
     const sorted = [...decision.elements].sort((a, b) => (probabilityFor(decision, a) ?? 0) - (probabilityFor(decision, b) ?? 0));
     for (const element of sorted) {
         const probability = probabilityFor(decision, element);
-        const isPick = chosenIndex !== null && element.i === chosenIndex;
+        const isPick = picked?.i === element.i;
         const scored = probability !== null && probability >= 0.02;
         if (layer === 'pick' && !isPick) continue;
         if (layer === 'scored' && !isPick && !scored) continue;
@@ -283,141 +361,242 @@ function drawOverlay(decision: RecentDecision | null): void {
     }
 
     // Keep the banner off the pick: top by default, bottom when the pick is in the upper third.
-    const picked = chosenIndex !== null ? decision.elements.find((element) => element.i === chosenIndex) : undefined;
     const pickNearTop = picked ? picked.rect[1] + picked.rect[3] / 2 < screen.height * 0.34 : false;
     banner.hidden = false;
     banner.className = `jev-banner ${decision.escalated ? 'is-escalated' : 'is-ok'} ${pickNearTop ? 'at-bottom' : 'at-top'}`;
-    banner.innerHTML = bannerHtml(decision);
+    banner.innerHTML = bannerHtml(decision, picked);
 }
 
-function bannerHtml(decision: RecentDecision): string {
+function bannerHtml(decision: RecentDecision, picked: CompactElement | undefined): string {
     const head = decision.escalated
         ? `<strong>Escalate</strong><span>${escapeHtml(decision.escalationReason ?? 'unknown reason')} · nothing tapped</span>`
         : decision.kind === 'screen'
             ? `<strong>Screen: ${escapeHtml(decision.chosen)}</strong><span>${percent(decision.confidence)} confidence · fits ${percent(decision.fits)}</span>`
             : decision.kind === 'element'
-                ? `<strong>Tap #${escapeHtml(decision.chosen)}</strong><span>${percent(decision.confidence)} confidence · fits ${percent(decision.fits)}</span>`
+                ? `<strong>Tap #${escapeHtml(decision.chosen)} · ${escapeHtml(elementName(picked, decision.chosen ?? ''))}</strong><span>${percent(decision.confidence)} confidence · fits ${percent(decision.fits)}</span>`
                 : `<strong>Asked</strong><span>${Object.entries(decision.probabilities).map(([id, p]) => `${escapeHtml(id)} ${percent(p)}`).join(' · ')}</span>`;
     return `${head}<em>${decision.latencyMs} ms</em>`;
 }
 
-// --- side panel ----------------------------------------------------------------
+// --- HUD: brand -------------------------------------------------------------------------
 
-/** The plain-English question the workflow asked, reconstructed from what was stored. */
-function questionText(decision: RecentDecision): string {
-    const q = decision.questions;
-    if (decision.kind === 'element') return `Which element should be tapped to: ${String(q.goal ?? '')}`;
-    if (decision.kind === 'screen') {
-        const pick = q.pick as { criteria?: Record<string, string> } | undefined;
-        const names = Object.keys(pick?.criteria ?? {}).filter((name) => name !== 'unknown');
-        return `Which screen is showing? Options: ${names.join(', ') || '—'}`;
-    }
-    return Object.entries(q).map(([id, text]) => `${id}: ${String(text)}`).join(' · ');
+function renderBrand(): void {
+    const newest = decisions[0];
+    const enabled = metrics?.enabled ?? true;
+    const recentlyDecided = newest ? Date.now() - new Date(newest.createdAt).getTime() < DECIDING_GLOW_MS : false;
+    const state = !enabled ? 'off' : asking || recentlyDecided ? 'deciding' : 'watching';
+    hudBrand.className = `jev-hud-card jev-hud-brand is-${state}`;
+    hudState.textContent = state === 'off' ? 'is off' : state === 'deciding' ? 'is deciding' : 'is watching';
+    hudModel.textContent = `System One · ${metrics?.model ?? newest?.model ?? '—'}`;
+    const shown = currentDecision();
+    hudLatency.textContent = asking ? `${Math.round((Date.now() - asking.startedAt) / 100) / 10}s` : shown ? `${shown.latencyMs} ms` : '— ms';
+    enabledPill.textContent = enabled ? 'Decisions · on' : 'Decisions · off';
+    enabledPill.classList.toggle('is-off', !enabled);
+    document.querySelector('.jev-header h1 em')!.textContent = state === 'off' ? 'is off' : state === 'deciding' ? 'is deciding' : 'is watching';
 }
 
-function optionLabel(decision: RecentDecision, key: string): string {
+// --- HUD: lanes -------------------------------------------------------------------------
+
+interface Lane {
+    key: string;
+    name: string;
+    sub: string;
+    probability: number;
+    tone: 'win' | 'danger' | 'plain';
+}
+
+/** The options Jev chose between, as lane cards. Element picks show the top three plus "none". */
+function lanesFor(decision: RecentDecision): Lane[] {
+    const entries = Object.entries(decision.probabilities);
+    const tone = (key: string, p: number): Lane['tone'] => {
+        if (key === decision.chosen) return decision.escalated ? 'danger' : 'win';
+        if (key === 'unknown' && p >= 0.2) return 'danger';
+        return 'plain';
+    };
     if (decision.kind === 'element') {
-        const options = decision.questions.options as Record<string, string> | undefined;
-        if (key === 'unknown') return 'unknown — no listed element fits';
-        return `#${key} ${options?.[key] ?? ''}`.trim();
+        const options = (decision.questions.options ?? {}) as Record<string, string>;
+        const ranked = entries.filter(([key]) => key !== 'unknown').sort((a, b) => b[1] - a[1]);
+        const top = ranked.slice(0, 3);
+        if (decision.chosen && !top.some(([key]) => key === decision.chosen) && decision.chosen !== 'unknown') {
+            const chosen = ranked.find(([key]) => key === decision.chosen);
+            if (chosen) top.splice(2, 1, chosen);
+        }
+        const lanes: Lane[] = top.map(([key, p]) => {
+            const element = decision.elements.find((candidate) => String(candidate.i) === key);
+            return { key, name: `#${key}`, sub: element ? `${elementName(element, key)} · ${element.role}` : options[key] ?? '', probability: p, tone: tone(key, p) };
+        });
+        const unknown = decision.probabilities.unknown ?? 0;
+        lanes.push({ key: 'unknown', name: 'None', sub: 'nothing fits', probability: unknown, tone: tone('unknown', unknown) });
+        return lanes;
     }
     if (decision.kind === 'screen') {
         const pick = decision.questions.pick as { criteria?: Record<string, string> } | undefined;
-        const description = pick?.criteria?.[key];
-        return description ? `${key} — ${description}` : key;
+        const order = Object.keys(pick?.criteria ?? decision.probabilities);
+        return order.map((key) => {
+            const p = decision.probabilities[key] ?? 0;
+            return { key, name: key === 'unknown' ? 'None' : key.replace(/-/g, ' '), sub: key === 'unknown' ? 'nothing fits' : (pick?.criteria?.[key] ?? '').split(/[:—(]/)[0]!.trim(), probability: p, tone: tone(key, p) };
+        });
     }
-    return key;
+    return entries.map(([key, p]) => ({ key, name: key, sub: String(decision.questions[key] ?? ''), probability: p, tone: p >= 0.5 ? 'win' : 'plain' }));
 }
 
-function renderPanel(decision: RecentDecision | null): void {
+function renderLanes(decision: RecentDecision | null): void {
+    if (!decision) {
+        lanesTitle.textContent = 'This decision';
+        lanesWhen.textContent = '';
+        lanesEl.innerHTML = '<p class="jev-empty">No decision yet.</p>';
+        verdictEl.className = 'jev-verdict is-idle';
+        verdictMain.textContent = '—';
+        verdictSub.textContent = '';
+        return;
+    }
+    lanesTitle.textContent = kindTitle(decision.kind);
+    lanesWhen.textContent = `${shortSource(decision.source)} · ${timeAgo(decision.createdAt)}`;
+    const lanes = lanesFor(decision);
+    lanesEl.className = `jev-lanes cols-${Math.min(lanes.length, 5)}`;
+    lanesEl.innerHTML = lanes.map((lane) => `
+        <div class="jev-lane is-${lane.tone}" style="--p:${lane.probability}" title="${escapeHtml(lane.sub)}">
+            <span class="jev-lane-name">${escapeHtml(lane.name)}</span>
+            <span class="jev-lane-sub">${escapeHtml(lane.sub)}</span>
+            <span class="jev-lane-bar" aria-hidden="true"></span>
+            <strong class="jev-lane-p">${percent(lane.probability)}</strong>
+        </div>`).join('');
+
+    const picked = chosenElement(decision);
+    verdictEl.className = `jev-verdict ${decision.escalated ? 'is-escalated' : 'is-ok'}`;
+    if (decision.escalated) {
+        verdictMain.textContent = `Escalate · ${decision.escalationReason ?? 'unknown'}`;
+        verdictSub.textContent = `${decision.chosen ? `winner was ${decision.chosen} at ${percent(decision.confidence)}` : percent(decision.confidence)} · fits ${percent(decision.fits)} · ${decision.latencyMs} ms`;
+    } else if (decision.kind === 'element') {
+        verdictMain.textContent = `Tap #${decision.chosen} · ${elementName(picked, decision.chosen ?? '')}`;
+        verdictSub.textContent = `${percent(decision.confidence)} of choice · fits ${percent(decision.fits)} · ${decision.latencyMs} ms`;
+    } else if (decision.kind === 'screen') {
+        verdictMain.textContent = `Screen · ${decision.chosen}`;
+        verdictSub.textContent = `${percent(decision.confidence)} of choice · fits ${percent(decision.fits)} · ${decision.latencyMs} ms`;
+    } else {
+        verdictMain.textContent = 'Answered';
+        verdictSub.textContent = `${Object.entries(decision.probabilities).map(([id, p]) => `${id} ${percent(p)}`).join(' · ')} · ${decision.latencyMs} ms`;
+    }
+}
+
+// --- HUD: keys ------------------------------------------------------------------------------
+
+function renderKeys(decision: RecentDecision | null): void {
+    const pressed = decision ? keyFor(decision) : { key: null, note: 'Jev never presses a key itself — it answers with an index and the workflow decides.' };
+    for (const button of keyButtons) {
+        const isPressed = button.dataset.key === pressed.key;
+        button.classList.toggle('is-pressed', isPressed);
+        button.classList.toggle('is-danger', isPressed && pressed.key === 'escalate');
+    }
+    keyNote.textContent = pressed.note;
+}
+
+// --- HUD: feed --------------------------------------------------------------------------------
+
+function feedChip(decision: RecentDecision): string {
+    if (decision.escalated) return `<span class="jev-chip is-escalated">Escalate · ${escapeHtml(decision.escalationReason ?? '')}</span>`;
+    if (decision.kind === 'element') return `<span class="jev-chip is-ok">Tap #${escapeHtml(decision.chosen)} · ${percent(decision.confidence)}</span>`;
+    if (decision.kind === 'screen') return `<span class="jev-chip is-ok">${escapeHtml(decision.chosen)} · ${percent(decision.confidence)}</span>`;
+    return `<span class="jev-chip is-ok">${Object.entries(decision.probabilities).map(([id, p]) => `${escapeHtml(id)} ${percent(p)}`).join(' · ')}</span>`;
+}
+
+function renderFeed(): void {
+    const rows: string[] = [];
+    if (asking) {
+        rows.push(`<li class="jev-feed-row is-asking"><time>${clock(new Date(asking.startedAt).toISOString())}</time><span class="jev-feed-what">${escapeHtml(asking.kind === 'element' ? asking.goal ?? '' : 'which screen?')}</span><span class="jev-chip is-asking">asking<i>…</i></span></li>`);
+    }
+    for (const decision of decisions) {
+        rows.push(`<li class="jev-feed-row${decision.id === selectedId ? ' is-active' : ''}${decision.escalated ? ' is-escalated' : ''}" data-id="${escapeHtml(decision.id)}">
+            <time>${clock(decision.createdAt)}</time>
+            <span class="jev-feed-what" title="${escapeHtml(questionText(decision))}">${escapeHtml(decision.kind === 'element' ? String(decision.questions.goal ?? 'which element?') : decision.kind === 'screen' ? 'which screen?' : 'yes / no')} <em>${decision.elements.length} el · ${escapeHtml(shortSource(decision.source))} · ${decision.latencyMs} ms</em></span>
+            ${feedChip(decision)}
+        </li>`);
+    }
+    feedEl.innerHTML = rows.length ? rows.join('') : '<li class="jev-empty">No decisions yet. Ask Jev something on the left, or run a workflow with decisions enabled (e.g. <code>open-app</code> with <code>OPEN_APP_USE_DECISIONS=true</code>).</li>';
+}
+
+function renderStats(): void {
+    const parts: string[] = [];
+    if (metrics) {
+        parts.push(`${metrics.totals.decisions} decisions`);
+        parts.push(`${percent(metrics.totals.rate)} escalated`);
+        const [thisWeek, lastWeek] = metrics.byWeek;
+        if (thisWeek) parts.push(`this week ${percent(thisWeek.rate)}${lastWeek ? ` (last ${percent(lastWeek.rate)})` : ''}`);
+    }
+    if (decisions.length) {
+        const avg = Math.round(decisions.reduce((sum, decision) => sum + decision.latencyMs, 0) / decisions.length);
+        const tokens = decisions.reduce((sum, decision) => sum + decision.inputTokens + decision.outputTokens, 0);
+        parts.push(`avg ${avg} ms`, `${formatTokens(tokens)} tokens in view`);
+    }
+    hudStats.textContent = parts.join(' · ') || '—';
+}
+
+// --- stage text -------------------------------------------------------------------------------
+
+function renderCaption(decision: RecentDecision | null): void {
+    if (!decision) {
+        caption.textContent = '';
+        return;
+    }
+    const screen = screenSizeFor(decision);
+    caption.textContent = `${decision.elements.length} elements · ${screen.width}×${screen.height} pt · ${clock(decision.createdAt)}`;
+}
+
+function renderStage(decision: RecentDecision | null): void {
+    renderCaption(decision);
     if (!decision) {
         title.textContent = 'Waiting for a decision';
         meta.textContent = 'Pick a phone. The overlay updates the moment a workflow asks Jev something.';
         questionEl.textContent = '—';
-        verdictEl.hidden = true;
-        for (const el of [statConfidence, statFits, statLatency, statTokens]) el.textContent = '—';
-        probabilitiesEl.innerHTML = '<li class="jev-empty">No decision selected.</li>';
         elementsEl.innerHTML = '';
         elementsCount.textContent = '';
-        caption.textContent = '';
         return;
     }
-    const kindLabel = decision.kind === 'screen' ? 'Which screen is this?' : decision.kind === 'element' ? 'Which element do I tap?' : 'Yes / no check';
-    title.textContent = kindLabel;
+    title.textContent = kindTitle(decision.kind);
     meta.textContent = `${deviceLabel(decision.deviceUdid)} · ${decision.source ?? 'unknown source'} · ${decision.model} · ${timeAgo(decision.createdAt)}${decision.executionId ? ` · execution ${decision.executionId.slice(0, 8)}` : ''}`;
     questionEl.textContent = questionText(decision);
-
-    verdictEl.hidden = false;
-    verdictEl.className = `agent-action-chip ${decision.escalated ? 'error' : 'ok'}`;
-    const verdictText = decision.escalated
-        ? `ESCALATE · ${decision.escalationReason ?? 'unknown'}${decision.chosen ? ` (winner was ${decision.chosen})` : ''}`
-        : decision.kind === 'ask'
-            ? 'Answered'
-            : `${decision.kind === 'element' ? 'Tap element' : 'Screen'} ${decision.chosen ?? '—'}`;
-    verdictEl.innerHTML = `<span class="agent-action-icon" aria-hidden="true">${decision.escalated ? '↗' : '✓'}</span><span>${escapeHtml(verdictText)}</span>`;
-
-    statConfidence.textContent = percent(decision.confidence);
-    statFits.textContent = percent(decision.fits);
-    statLatency.textContent = `${decision.latencyMs} ms`;
-    statTokens.textContent = `${formatTokens(decision.inputTokens)} in · ${formatTokens(decision.outputTokens)} out`;
-
-    const entries = Object.entries(decision.probabilities).sort((a, b) => b[1] - a[1]);
-    const shown = decision.kind === 'element' ? entries.filter(([key, p], index) => p >= 0.01 || key === decision.chosen || index < 3) : entries;
-    probabilitiesEl.innerHTML = shown.length
-        ? shown.map(([key, p]) => `<li class="jev-prob${key === decision.chosen ? ' is-chosen' : ''}${key === 'unknown' ? ' is-unknown' : ''}"><span class="jev-prob-bar" style="--p:${p}"></span><span class="jev-prob-label">${escapeHtml(optionLabel(decision, key))}</span><span class="jev-prob-value">${percent(p)}</span></li>`).join('')
-            + (decision.kind === 'element' && entries.length > shown.length ? `<li class="jev-empty">${entries.length - shown.length} more at 0%</li>` : '')
-        : '<li class="jev-empty">No probabilities recorded.</li>';
-
     elementsCount.textContent = `(${decision.elements.length})`;
     elementsEl.innerHTML = decision.elements.map((element) => {
         const p = probabilityFor(decision, element);
         return `<li class="${String(element.i) === decision.chosen ? 'is-chosen' : ''}"><code>#${element.i}</code> ${escapeHtml(element.role)}${element.label ? ` <strong>${escapeHtml(element.label)}</strong>` : ''}${element.value ? ` <em>${escapeHtml(element.value)}</em>` : ''}<span class="jev-el-rect">${element.rect.join(', ')}</span>${p !== null && p >= 0.01 ? `<span class="jev-el-p">${percent(p)}</span>` : ''}</li>`;
     }).join('');
-    caption.textContent = `${decision.elements.length} elements · ${screenSizeFor(decision).width}×${screenSizeFor(decision).height} pt · ${new Date(decision.createdAt).toLocaleTimeString()}`;
 }
 
-function renderHistory(): void {
-    if (!decisions.length) {
-        historyEl.className = 'agent-history jev-history';
-        historyEl.innerHTML = '<li class="jev-empty">No decisions yet. Run a workflow with decisions enabled — e.g. <code>open-app</code> with <code>OPEN_APP_USE_DECISIONS=true</code>.</li>';
-        return;
-    }
-    historyEl.className = 'agent-history jev-history';
-    historyEl.innerHTML = decisions.map((decision) => {
-        const icon = decision.kind === 'screen' ? '▣' : decision.kind === 'element' ? '⊙' : '?';
-        const summary = decision.kind === 'ask'
-            ? Object.entries(decision.probabilities).map(([id, p]) => `${id} ${percent(p)}`).join(' · ')
-            : `${decision.chosen ?? '—'} · ${percent(decision.confidence)}`;
-        return `<li class="agent-history-item jev-history-item${decision.id === selectedId ? ' is-active' : ''}${decision.escalated ? ' is-escalated' : ''}" data-id="${escapeHtml(decision.id)}">
-            <span class="jev-history-icon" aria-hidden="true">${icon}</span>
-            <span class="jev-history-body"><strong>${escapeHtml(summary)}</strong><span>${escapeHtml(deviceLabel(decision.deviceUdid))} · ${escapeHtml(decision.source ?? '')} · ${decision.latencyMs} ms · ${timeAgo(decision.createdAt)}</span></span>
-            <span class="jev-history-flag">${decision.escalated ? 'ESC' : ''}</span>
-        </li>`;
-    }).join('');
-}
+// --- selection ---------------------------------------------------------------------------------
 
 function currentDecision(): RecentDecision | null {
     return decisions.find((decision) => decision.id === selectedId) ?? null;
 }
 
+function renderAll(): void {
+    const decision = currentDecision();
+    renderStage(decision);
+    drawOverlay(decision);
+    renderLanes(decision);
+    renderKeys(decision);
+    renderFeed();
+    renderBrand();
+    renderStats();
+}
+
 function select(id: string | null, options: { animate?: boolean } = {}): void {
     selectedId = id;
+    renderAll();
     const decision = currentDecision();
-    renderPanel(decision);
-    drawOverlay(decision);
-    renderHistory();
     if (decision) {
         void ensureScreenSize(decision.deviceUdid);
         showLiveStream(decision.deviceUdid);
         if (options.animate) {
-            frame.classList.remove('is-fresh');
-            void frame.offsetWidth;
-            frame.classList.add('is-fresh');
+            for (const el of [frame, lanesEl, verdictEl]) {
+                el.classList.remove('is-fresh');
+                void el.offsetWidth;
+                el.classList.add('is-fresh');
+            }
         }
     }
 }
 
-// --- data ----------------------------------------------------------------------
+// --- data -------------------------------------------------------------------------------------
 
 async function loadDevices(): Promise<void> {
     try {
@@ -433,21 +612,13 @@ async function loadDevices(): Promise<void> {
 
 async function loadMetrics(): Promise<void> {
     try {
-        const metrics = await api<Metrics>('/api/decisions/metrics?weeks=8');
+        metrics = await api<Metrics>('/api/decisions/metrics?weeks=8');
         unconfigured.hidden = metrics.enabled;
-        modelBadge.hidden = false;
-        modelName.textContent = metrics.enabled ? `${metrics.model} · live` : `${metrics.model} · off`;
-        $('#jev-metric-total').textContent = String(metrics.totals.decisions);
-        $('#jev-metric-rate').textContent = metrics.totals.decisions ? percent(metrics.totals.rate) : '—';
-        const [thisWeek, lastWeek] = metrics.byWeek;
-        $('#jev-metric-week').textContent = thisWeek ? `${percent(thisWeek.rate)} of ${thisWeek.decisions}` : '—';
-        $('#jev-metric-prev').textContent = lastWeek ? `${percent(lastWeek.rate)} of ${lastWeek.decisions}` : '—';
-        $('#jev-metric-latency').textContent = thisWeek ? `${thisWeek.avgLatencyMs} ms` : '—';
-        $('#jev-metric-model').textContent = metrics.model;
-    } catch (error) {
-        modelBadge.hidden = false;
-        modelName.textContent = error instanceof Error ? error.message : 'metrics unavailable';
+    } catch {
+        metrics = null;
     }
+    renderBrand();
+    renderStats();
 }
 
 async function loadDecisions(): Promise<void> {
@@ -462,17 +633,14 @@ async function loadDecisions(): Promise<void> {
             if (newestBefore !== undefined) void loadMetrics();
         } else if (!selectedId && newest) {
             select(newest.id);
+        } else if (!currentDecision()) {
+            select(newest?.id ?? null);
         } else {
-            renderHistory();
-            if (!currentDecision()) select(newest?.id ?? null);
+            renderAll();
         }
-        if (!decisions.length) {
-            select(null);
-            showLiveStream(udid || null);
-        }
+        if (!decisions.length) showLiveStream(udid || null);
     } catch (error) {
-        historyEl.className = 'agent-history jev-history';
-        historyEl.innerHTML = `<li class="jev-empty">${escapeHtml(error instanceof Error ? error.message : 'Could not load decisions')}</li>`;
+        feedEl.innerHTML = `<li class="jev-empty">${escapeHtml(error instanceof Error ? error.message : 'Could not load decisions')}</li>`;
     }
 }
 
@@ -492,7 +660,7 @@ function setFollowing(next: boolean): void {
     if (following && decisions[0]) select(decisions[0].id);
 }
 
-// --- probe -----------------------------------------------------------------------
+// --- probe -------------------------------------------------------------------------------------
 
 /** The phone a probe should look at: the filter if set, else the phone of the shown decision, else the first online one. */
 function probeTarget(): string | null {
@@ -519,6 +687,10 @@ async function probe(kind: 'element' | 'screen'): Promise<void> {
     probeStatus.hidden = false;
     probeStatus.className = 'jev-probe-status';
     probeStatus.textContent = `Reading ${deviceLabel(udid)}'s screen and asking Jev…`;
+    asking = { kind, goal, startedAt: Date.now() };
+    renderFeed();
+    renderBrand();
+    const ticker = window.setInterval(renderBrand, 100);
     try {
         const result = await api<{ kind: string; verdict: { value: unknown; confidence: number; fits?: number; escalate: boolean; reason?: string; latencyMs: number }; elements: number; tokenEstimate: number }>('/api/decisions/probe', {
             method: 'POST',
@@ -537,24 +709,31 @@ async function probe(kind: 'element' | 'screen'): Promise<void> {
         probeStatus.className = 'jev-probe-status is-error';
         probeStatus.textContent = error instanceof Error ? error.message : 'Probe failed';
     } finally {
+        window.clearInterval(ticker);
+        asking = null;
         probeElementButton.disabled = false;
         probeScreenButton.disabled = false;
+        renderFeed();
+        renderBrand();
     }
 }
 
+// --- wiring --------------------------------------------------------------------------------------
+
 probeForm.addEventListener('submit', (event) => { event.preventDefault(); void probe('element'); });
 probeScreenButton.addEventListener('click', () => { void probe('screen'); });
-
-// --- wiring --------------------------------------------------------------------
-
-historyEl.addEventListener('click', (event) => {
-    const item = (event.target as HTMLElement).closest<HTMLElement>('.jev-history-item');
+feedEl.addEventListener('click', (event) => {
+    const item = (event.target as HTMLElement).closest<HTMLElement>('.jev-feed-row[data-id]');
     if (!item?.dataset.id) return;
     setFollowing(false);
     select(item.dataset.id);
 });
 followButton.addEventListener('click', () => setFollowing(!following));
 refreshButton.addEventListener('click', () => { void loadDecisions(); void loadMetrics(); void loadDevices(); });
+whatSeesButton.addEventListener('click', () => {
+    elementsDetails.open = !elementsDetails.open;
+    if (elementsDetails.open) elementsDetails.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+});
 deviceSelect.addEventListener('change', () => {
     selectedId = null;
     void loadDecisions();
@@ -578,6 +757,8 @@ window.addEventListener('beforeunload', () => {
     stopLiveStream();
     if (pollTimer !== null) window.clearTimeout(pollTimer);
 });
+// "just now" → "12s ago", and the deciding glow fading back to watching.
+window.setInterval(() => { renderBrand(); if (currentDecision()) lanesWhen.textContent = `${shortSource(currentDecision()!.source)} · ${timeAgo(currentDecision()!.createdAt)}`; }, 2_000);
 
 void (async () => {
     await loadDevices();
