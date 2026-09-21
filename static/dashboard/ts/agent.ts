@@ -97,6 +97,7 @@ const historyEl = $<HTMLElement>('#agent-history');
 const refreshButton = $<HTMLButtonElement>('#agent-refresh');
 const liveGoal = $<HTMLElement>('#agent-live-goal');
 const liveMeta = $<HTMLElement>('#agent-live-meta');
+const liveEyebrow = $<HTMLElement>('#agent-live-eyebrow');
 const liveStatus = $<HTMLElement>('#agent-live-status');
 const liveNotes = $<HTMLElement>('#agent-live-notes');
 const stopButton = $<HTMLButtonElement>('#agent-stop');
@@ -404,6 +405,15 @@ function relativeTime(iso: string): string {
     return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
+/** Time of day for today's runs; date + time once a run is older than that, so a stale run never passes for a fresh one. */
+function runClock(iso: string): string {
+    const date = new Date(iso);
+    const sameDay = date.toDateString() === new Date().toDateString();
+    return sameDay
+        ? date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+        : date.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+
 function statusLabel(status: RunStatus): string {
     return { running: 'Running', succeeded: 'Succeeded', failed: 'Failed', stopped: 'Stopped' }[status];
 }
@@ -616,7 +626,8 @@ function renderRun(run: AgentRun): void {
     narrateRun(run, wasRunning);
     livePanel.dataset.status = run.status;
     liveGoal.textContent = run.goal;
-    liveMeta.textContent = `${run.deviceName} · ${run.model} · started ${new Date(run.createdAt).toLocaleTimeString()}`;
+    liveEyebrow.textContent = run.status === 'running' ? 'Live run' : `Last run · ${relativeTime(run.createdAt)}`;
+    liveMeta.textContent = `${run.deviceName} · ${run.model} · started ${runClock(run.createdAt)}${run.finishedAt && run.status !== 'running' ? ` · ${statusLabel(run.status).toLowerCase()} ${runClock(run.finishedAt)}` : ''}`;
     liveStatus.hidden = false;
     liveStatus.className = `agent-status-pill ${run.status}`;
     liveStatus.innerHTML = `${run.status === 'running' ? '<span class="spinner small" aria-hidden="true"></span>' : ''}${escapeHtml(statusLabel(run.status))}`;

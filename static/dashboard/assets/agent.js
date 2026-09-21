@@ -21,6 +21,7 @@ const historyEl = $('#agent-history');
 const refreshButton = $('#agent-refresh');
 const liveGoal = $('#agent-live-goal');
 const liveMeta = $('#agent-live-meta');
+const liveEyebrow = $('#agent-live-eyebrow');
 const liveStatus = $('#agent-live-status');
 const liveNotes = $('#agent-live-notes');
 const stopButton = $('#agent-stop');
@@ -345,6 +346,14 @@ function relativeTime(iso) {
         return `${hours} h ago`;
     return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
+/** Time of day for today's runs; date + time once a run is older than that, so a stale run never passes for a fresh one. */
+function runClock(iso) {
+    const date = new Date(iso);
+    const sameDay = date.toDateString() === new Date().toDateString();
+    return sameDay
+        ? date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+        : date.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
 function statusLabel(status) {
     return { running: 'Running', succeeded: 'Succeeded', failed: 'Failed', stopped: 'Stopped' }[status];
 }
@@ -559,7 +568,8 @@ function renderRun(run) {
     narrateRun(run, wasRunning);
     livePanel.dataset.status = run.status;
     liveGoal.textContent = run.goal;
-    liveMeta.textContent = `${run.deviceName} · ${run.model} · started ${new Date(run.createdAt).toLocaleTimeString()}`;
+    liveEyebrow.textContent = run.status === 'running' ? 'Live run' : `Last run · ${relativeTime(run.createdAt)}`;
+    liveMeta.textContent = `${run.deviceName} · ${run.model} · started ${runClock(run.createdAt)}${run.finishedAt && run.status !== 'running' ? ` · ${statusLabel(run.status).toLowerCase()} ${runClock(run.finishedAt)}` : ''}`;
     liveStatus.hidden = false;
     liveStatus.className = `agent-status-pill ${run.status}`;
     liveStatus.innerHTML = `${run.status === 'running' ? '<span class="spinner small" aria-hidden="true"></span>' : ''}${escapeHtml(statusLabel(run.status))}`;
