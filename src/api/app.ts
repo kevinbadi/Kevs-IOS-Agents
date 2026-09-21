@@ -35,6 +35,7 @@ import { AgentRunner } from '../agent/runner.js';
 import { registerAgentRoutes } from '../agent/routes.js';
 import { visionModelFromEnv } from '../agent/vlm.js';
 import { OllamaVisionModel, localVisionModelFromEnv } from '../agent/local-vlm.js';
+import { decisionsConfigFromEnv, escalationRateByWeek } from '../decisions/index.js';
 
 export interface CreateAppOptions {
     plugins: PluginRegistry;
@@ -359,6 +360,26 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
         id: plugin.id, version: plugin.version, displayName: plugin.displayName,
         tasks: plugin.tasks.map(({ type, version, displayName }) => ({ type, version, displayName })),
     })));
+    // Semantic-decision telemetry (src/decisions). The number that matters is
+    // the weekly escalation rate; if it isn't falling, the approach isn't working.
+    app.get<{ Querystring: { weeks?: string; source?: string } }>('/api/decisions/metrics', async (request, reply) => {
+        const connection = options.scheduler.connection;
+        if (!connection) return reply.code(503).send({ error: 'Decision telemetry is not available without a database' });
+        const config = decisionsConfigFromEnv();
+        const weeks = Math.min(52, Math.max(1, Number(request.query.weeks) || 12));
+        const byWeek = await escalationRateByWeek(connection, weeks, request.query.source?.trim() || undefined);
+        const totals = byWeek.reduce((sum, bucket) => ({
+            decisions: sum.decisions + bucket.decisions, escalated: sum.escalated + bucket.escalated,
+        }), { decisions: 0, escalated: 0 });
+        return {
+            enabled: Boolean(config.apiKey),
+            model: config.model,
+            confidenceThreshold: config.confidenceThreshold,
+            fitThreshold: config.fitThreshold,
+            totals: { ...totals, rate: totals.decisions ? totals.escalated / totals.decisions : 0 },
+            byWeek,
+        };
+    });
     app.get('/api/devices', async () => registeredWithStatus());
     app.get('/api/devices/discovered', async () => discoverConnectedDevices());
     app.get('/api/device-registrations/candidates', async (_request, reply) => {

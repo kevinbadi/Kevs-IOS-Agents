@@ -22,6 +22,13 @@
       "when": 1789251238226,
       "tag": "0002_peaceful_barracuda",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1789950969718,
+      "tag": "0003_fearless_frog_thor",
+      "breakpoints": true
     }
   ]
 }

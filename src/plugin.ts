@@ -12,6 +12,9 @@ import type {
 import type { SchedulerRepository } from './scheduler/repository.js';
 import type { RegisteredDevice } from './devices/registry.js';
 import type { RemoteControl } from './devices/wda-remote.js';
+import type { IndexedElement } from './devices/elements.js';
+
+export type { IndexedElement } from './devices/elements.js';
 
 export interface DeviceAutomation {
     activateApp(bundleId: string): Promise<void>;
@@ -20,6 +23,11 @@ export interface DeviceAutomation {
     screenshot(): Promise<Buffer>;
     tap(x: number, y: number): Promise<void>;
     swipe(startX: number, startY: number, endX: number, endY: number, durationMs: number): Promise<void>;
+    /**
+     * Visible, hittable on-screen elements, pruned and numbered (≤120). Pair
+     * with `decisions` to pick one by index; tap its rect centre yourself.
+     */
+    elements(): Promise<IndexedElement[]>;
 }
 
 export interface TaskValidationContext {

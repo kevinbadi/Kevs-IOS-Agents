@@ -1,4 +1,4 @@
-import { bigint, index, integer, jsonb, pgSchema, primaryKey, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { bigint, boolean, index, integer, jsonb, pgSchema, primaryKey, real, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 
 import type { JsonObject, ScheduleTiming } from '../types.js';
 
@@ -91,6 +91,37 @@ export const pipelineItems = schedulerSchema.table('pipeline_items', {
     index('pipeline_items_asset_idx').on(table.assetId),
 ]);
 
+/**
+ * One row per semantic decision (src/decisions). The number that matters is
+ * the escalation rate over time — if it is not falling week over week, the
+ * approach is not working.
+ */
+export const decisions = schedulerSchema.table('decisions', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    executionId: uuid('execution_id').references(() => executions.id, { onDelete: 'set null' }),
+    deviceUdid: text('device_udid').notNull(),
+    /** "screen" | "element" | "ask" */
+    kind: text('kind').notNull(),
+    source: text('source'),
+    model: text('model').notNull(),
+    questions: jsonb('questions').$type<JsonObject>().notNull(),
+    chosen: text('chosen'),
+    probabilities: jsonb('probabilities').$type<Record<string, number>>().notNull(),
+    confidence: real('confidence'),
+    fits: real('fits'),
+    escalated: boolean('escalated').notNull(),
+    escalationReason: text('escalation_reason'),
+    latencyMs: integer('latency_ms').notNull(),
+    inputTokens: integer('input_tokens').notNull().default(0),
+    outputTokens: integer('output_tokens').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+}, (table) => [
+    index('decisions_created_idx').on(table.createdAt),
+    index('decisions_escalated_idx').on(table.escalated, table.createdAt),
+    index('decisions_execution_idx').on(table.executionId),
+]);
+
 export type ScheduleRow = typeof schedules.$inferSelect;
+export type DecisionRow = typeof decisions.$inferSelect;
 export type ExecutionRow = typeof executions.$inferSelect;
 export type PipelineItemRow = typeof pipelineItems.$inferSelect;

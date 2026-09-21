@@ -118,7 +118,7 @@ export const likeTask: TaskDefinition<LikePayload> = {
 | `executionId`, `attempt` | Identity / retry number |
 | `device` | `{ udid, name, osVersion?, productType? }` |
 | `devicePluginData` | `devices.json` → `pluginData[yourPluginId]` for this device |
-| `automation` | `activateApp`, `terminateApp`, `pause(ms, signal)`, `screenshot`, `tap(x,y)`, `swipe(x1,y1,x2,y2,ms)` — points, via WDA |
+| `automation` | `activateApp`, `terminateApp`, `pause(ms, signal)`, `screenshot`, `tap(x,y)`, `swipe(x1,y1,x2,y2,ms)` — points, via WDA; `elements()` — pruned, indexed on-screen elements for [semantic decisions](decisions.md) |
 | `assets` | `StoredAsset[]` — uploaded files for this task, already on disk (`asset.path`) |
 | `workspaceDirectory` | Private temp dir, deleted after the run |
 | `signal` | `AbortSignal` — fires on stop request or deadline. **Check it and return `{ stopped: true }` promptly.** |

@@ -1,4 +1,5 @@
 import { coordinatesForProfile } from './coordinates.js';
+import { indexElementsReport, type IndexedElementReport } from './elements.js';
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 
@@ -198,6 +199,18 @@ export class WdaRemoteControl {
             throw new RemoteDeviceError('WebDriverAgent returned an invalid page source');
         }
         return payload.value;
+    }
+
+    /**
+     * Pruned, indexed element list built from the page source — what a
+     * decision model chooses from. See `devices/elements.ts` for the rules.
+     */
+    async getIndexedElements(udid: string, options: { max?: number } = {}): Promise<IndexedElementReport> {
+        const [xml, screen] = await Promise.all([
+            this.getSource(udid),
+            this.cachedScreenInfo ? Promise.resolve(this.cachedScreenInfo) : this.getScreenInfo(udid),
+        ]);
+        return indexElementsReport(xml, { screen: screen.screenSize, max: options.max });
     }
 
     /**

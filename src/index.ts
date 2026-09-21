@@ -36,3 +36,8 @@ export {
     type RegistrationUpdate,
 } from './devices/registration.js';
 export * from './devices/wda-remote.js';
+export {
+    DEFAULT_MAX_ELEMENTS, compactElements, elementCentre, estimateTokens, indexElements, indexElementsReport,
+    serializeElements, type CompactElement, type IndexElementsOptions, type IndexedElementReport,
+} from './devices/elements.js';
+export * from './decisions/index.js';

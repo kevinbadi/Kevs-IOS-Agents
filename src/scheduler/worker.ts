@@ -1,6 +1,7 @@
 import type { JobWithMetadata } from 'pg-boss';
 
 import { assertDatabaseReady, createDatabaseConnection } from '../database/client.js';
+import { DrizzleDecisionSink, decisionsConfigFromEnv, setDecisionSink } from '../decisions/index.js';
 import { activeDevices, loadRegisteredDevices } from '../devices/registry.js';
 import { configuredPluginModules, loadPlugins } from '../loader.js';
 import { PluginRegistry } from '../registry.js';
@@ -20,6 +21,12 @@ export async function startWorker(plugins: PluginRegistry): Promise<WorkerRuntim
     await boss.start();
     const repository = new SchedulerRepository(connection, boss, plugins);
     const workingQueues = new Set<string>();
+    // Tasks record semantic decisions here (src/decisions); off = nothing is sent anywhere.
+    setDecisionSink(new DrizzleDecisionSink(connection));
+    const decisionsConfig = decisionsConfigFromEnv();
+    console.log(decisionsConfig.apiKey
+        ? `Decisions enabled · ${decisionsConfig.model} · escalate under ${decisionsConfig.confidenceThreshold} confidence`
+        : 'Decisions unavailable (TYPESAFE_API_KEY unset) · plugins use their built-in logic');
 
     const registerDeviceWorkers = async (): Promise<void> => {
         for (const device of activeDevices(await loadRegisteredDevices())) {
@@ -74,6 +81,7 @@ export async function startWorker(plugins: PluginRegistry): Promise<WorkerRuntim
             clearInterval(deviceTimer);
             clearInterval(cleanupTimer);
             clearInterval(reconcileTimer);
+            setDecisionSink(null);
             await boss.stop({ graceful: true, timeout: 30_000 });
             await connection.close();
         },

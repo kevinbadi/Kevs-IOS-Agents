@@ -82,23 +82,21 @@ async function waitForDevice(
     throw new Error(`Execution window expired: ${lastProblem}`);
 }
 
-function deviceAutomation(registered: RegisteredDevice, passcode: string | undefined): DeviceAutomation {
+function deviceAutomation(
+    registered: RegisteredDevice,
+    passcode: string | undefined,
+    log: (line: string) => Promise<void> = async () => {},
+): DeviceAutomation {
     const udid = registered.udid;
     const remote = new WdaRemoteControl({
         deviceUdid: udid,
         wdaUrl: `http://127.0.0.1:${registered.wdaLocalPort ?? Number(process.env.WDA_LOCAL_PORT ?? 8100)}`,
         passcode,
     });
-    const appRequest = async (pathname: string, bundleId: string): Promise<void> => {
-        await remote.request(pathname, {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ bundleId }),
-        });
-    };
     return {
-        activateApp: (bundleId) => appRequest('/wda/apps/launch', bundleId),
-        terminateApp: (bundleId) => appRequest('/wda/apps/terminate', bundleId),
+        // Some WDA builds only mount /wda/apps/* inside a session; these fall back to one.
+        activateApp: (bundleId) => remote.launchApp(udid, bundleId),
+        terminateApp: (bundleId) => remote.terminateApp(udid, bundleId),
         pause: (milliseconds, signal) => new Promise((resolve, reject) => {
             if (signal?.aborted) return reject(signal.reason);
             const onAbort = () => { clearTimeout(timer); reject(signal!.reason); };
@@ -113,6 +111,12 @@ function deviceAutomation(registered: RegisteredDevice, passcode: string | undef
         swipe: (startX, startY, endX, endY, durationMs) => remote.performAction(udid, {
             type: 'swipe', startX, startY, endX, endY, durationMs,
         }),
+        elements: async () => {
+            const report = await remote.getIndexedElements(udid);
+            // Logged so the pruner can be tuned against real screens; the budget is ~4000 tokens.
+            await log(`elements: kept ${report.elements.length} of ${report.candidates} candidates (${report.total} nodes) · ~${report.tokenEstimate} tokens`);
+            return report.elements;
+        },
     };
 }
 
@@ -205,16 +209,17 @@ export async function executeAutomation(
             WDA_URL: `http://127.0.0.1:${registered.wdaLocalPort ?? Number(process.env.WDA_LOCAL_PORT ?? 8100)}`,
             ...(passcode ? { IOS_PASSCODE: passcode } : {}),
         };
+        const log = (line: string) => repository.appendLogs(execution.id, attempt, [line]);
         const context: TaskExecutionContext = {
             executionId: execution.id,
             attempt,
             workspaceDirectory,
             device,
             devicePluginData: registered.pluginData[execution.pluginId] ?? {},
-            automation: deviceAutomation(registered, passcode),
+            automation: deviceAutomation(registered, passcode, log),
             assets: await repository.executionAssets(execution),
             signal: controller.signal,
-            log: (line) => repository.appendLogs(execution.id, attempt, [line]),
+            log,
             runProcess: (specification) => runPluginProcess(specification, environment, controller.signal, (lines) => repository.appendLogs(execution.id, attempt, lines)),
             claimPipelineItem: () => repository.claimNextPipelineItem(execution.deviceUdid, execution.id),
             completePipelineItem: (id) => repository.completePipelineItem(id),
